@@ -1,0 +1,112 @@
+1. Data Collection
+
+Source: X-Plane 11 simulator (engine sensor logs).
+
+Format: .txt logs → converted into .csv.
+
+Features captured:
+
+Engine RPM, N1, N2
+
+Thrust, Fuel flow, EGT, Oil temp/pressure
+
+Electricals (voltage, amps)
+
+Flight parameters (altitude, IAS, climb rate)
+
+2. Data Preprocessing
+
+Parse .txt logs into structured CSV.
+
+Clean dataset:
+
+Remove duplicate & constant columns.
+
+Handle missing values (NaN imputation).
+
+Convert units if needed.
+
+Labeling:
+
+Inject synthetic failures when thresholds exceeded (e.g., RPM > 110%, EGT too high).
+
+Create failure target column.
+
+3. Exploratory Data Analysis (EDA)
+
+Visualize sensor distributions (histograms, KDE).
+
+Correlation heatmaps (to find key predictors).
+
+Time-series plots (RPM, N1, Oil Temp vs timestep).
+
+Identify anomalies/spikes before failures.
+
+4. Feature Engineering
+
+Create rolling averages (e.g., 5-step moving average of RPM).
+
+Calculate deltas (e.g., ∆ Oil Temp per second).
+
+Normalize/scale continuous features.
+
+Save processed dataset (data/processed/xplane_features.csv).
+
+5. Modeling
+5.1 XGBoost (baseline)
+
+Handles tabular data well.
+
+Train/Test split with stratification.
+
+Handle imbalance with:
+
+scale_pos_weight
+
+SMOTE (if needed).
+
+Save trained model (models/xplane_xgboost.pkl).
+
+5.2 LSTM (time-series)
+
+Input: sequential sensor values.
+
+Architecture: LSTM → Dense → Sigmoid.
+
+Train on sequences with failure labels.
+
+Save trained model (models/xplane_lstm.h5).
+
+6. Evaluation
+
+Metrics:
+
+Accuracy, Precision, Recall, F1, ROC-AUC.
+
+Visualizations:
+
+Confusion Matrix (XGBoost + LSTM).
+
+ROC Curves.
+
+Training Loss/Accuracy Curves (LSTM).
+
+Store plots in reports/figures/.
+
+7. Deployment
+
+Wrap best model into API/Dashboard:
+
+Streamlit → Live dashboard for predictions.
+
+Flask/FastAPI → REST endpoint for failure probability.
+
+Integrate CI/CD (GitHub Actions/Jenkins) for automation.
+
+8. Monitoring
+
+Track model drift with new simulator logs.
+
+Retrain pipeline if accuracy drops.
+
+Collect predictions & feedback for improvement.
