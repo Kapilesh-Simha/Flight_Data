@@ -7,9 +7,34 @@ from sklearn.metrics import accuracy_score, confusion_matrix, classification_rep
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
 
 DATA_FILE = r"C:\Users\kapil\OneDrive\Desktop\xplane_predictive_project\data\processed\xplane_features.csv"
 MODEL_OUT = r"C:\Users\kapil\OneDrive\Desktop\xplane_predictive_project\models\xplane_lstm.h5"
+
+def plot_lstm_roc(y_test, y_pred_proba, save_path=r"C:\Users\kapil\OneDrive\Desktop\xplane_predictive_project\reports\figures\lstm_roc_curve.png"):
+    """
+    Plot ROC curve for LSTM predictions.
+    """
+    # Compute ROC
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
+    roc_auc = auc(fpr, tpr)
+
+    # Plot
+    plt.figure(figsize=(8,6))
+    plt.plot(fpr, tpr, color="blue", lw=2, label=f"LSTM (AUC = {roc_auc:.2f})")
+    plt.plot([0, 1], [0, 1], color="gray", lw=2, linestyle="--")
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve - LSTM Model")
+    plt.legend(loc="lower right")
+    plt.grid(True)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    print(f"✅ ROC curve saved at: {save_path}")
 
 def create_sequences(X, y, timesteps=50):
     Xs, ys = [], []
@@ -78,6 +103,8 @@ def main():
     #save model
     model.save(MODEL_OUT)
     print(f"\n✅ LSTM model saved at: {MODEL_OUT}")
+    y_pred_proba = model.predict(X_test).ravel()
+    plot_lstm_roc(y_test, y_pred_proba)
 
 if __name__ == "__main__":
     main()
