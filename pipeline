@@ -110,3 +110,13 @@ Track model drift with new simulator logs.
 Retrain pipeline if accuracy drops.
 
 Collect predictions & feedback for improvement.
+
+xplane_predictive_project/
+├── data/               # raw, interim, processed
+├── notebooks/          # EDA, experiments
+├── src/                # features.py, modeling.py
+├── models/             # saved models
+├── reports/
+│   ├── figures/        # plots, ROC, confusion matrix
+│   └── summary/        # final_report.md
+└── streamlit_app.py    # deployment dashboard
