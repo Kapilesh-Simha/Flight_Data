@@ -1,0 +1,67 @@
+# --- Create placeholders ONCE at the start of your dashboard ---
+gauge_col, status_col = st.columns([2, 1])
+gauge_placeholder = gauge_col.empty()
+status_placeholder = status_col.empty()
+
+def update_gauge(prob, last_prob=[0]):
+    """
+    Fixed cockpit-style gauge with live-updating status text beside it.
+    Does NOT create new UI elements on each loop iteration.
+    """
+
+    # Clamp and smooth value
+    prob = max(0, min(prob, 1.0))
+    smooth_prob = last_prob[0] + (prob - last_prob[0]) * 0.3
+    last_prob[0] = smooth_prob
+
+    # Determine color zone + label
+    if smooth_prob < green_threshold:
+        color = "green"
+        status = "🟢 STABLE"
+        desc = "System operating normally."
+    elif smooth_prob < yellow_threshold:
+        color = "yellow"
+        status = "🟡 LOW RISK"
+        desc = "Minor anomalies detected. Monitor closely."
+    else:
+        color = "red"
+        status = "🔴 HIGH RISK"
+        desc = "Potential failure detected! Immediate attention required."
+
+    # --- Update the gauge in-place ---
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=smooth_prob,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': "Failure Probability", 'font': {'size': 22}},
+        gauge={
+            'axis': {'range': [0, 1]},
+            'bar': {'color': color},
+            'steps': [
+                {'range': [0, green_threshold], 'color': 'lightgreen'},
+                {'range': [green_threshold, yellow_threshold], 'color': 'yellow'},
+                {'range': [yellow_threshold, 1.0], 'color': 'salmon'}
+            ],
+            'threshold': {
+                'line': {'color': 'black', 'width': 3},
+                'thickness': 0.8,
+                'value': smooth_prob
+            }
+        }
+    ))
+
+    fig.update_layout(
+        height=250,
+        margin=dict(t=10, b=10, l=10, r=10),
+        transition={'duration': 400, 'easing': 'cubic-in-out'}
+    )
+
+    # Update gauge in place (no new charts)
+    gauge_placeholder.plotly_chart(fig, use_container_width=True)
+
+    # Update text beside it — also in place
+    status_placeholder.markdown(
+        f"<h2 style='color:{color}; margin-top:50px'>{status}</h2>"
+        f"<p style='font-size:18px;'>{desc}</p>",
+        unsafe_allow_html=True
+    )
