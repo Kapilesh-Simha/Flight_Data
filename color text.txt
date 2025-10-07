@@ -1,0 +1,19 @@
+zone_txt, color, desc = zone_label(smooth_combined, green_threshold, yellow_threshold)
+status_area.markdown(
+    f"""
+    <div style="
+        padding:10px;
+        border-radius:8px;
+        background-color:rgba(255,255,255,0.05);
+        border-left:6px solid {color};
+        color:{color};
+    ">
+    <h3 style="margin:0;font-size:22px">{zone_txt}</h3>
+    <p style="margin:4px 0;font-size:16px;color:white">{desc}</p>
+    <p style="margin:4px 0;color:lightgray">
+        Combined failure probability: <b style="color:{color}">{smooth_combined:.3f}</b>
+    </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
