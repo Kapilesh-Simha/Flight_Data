@@ -1,0 +1,61 @@
+pipeline {
+    agent any
+
+    environment {
+        PYTHONIOENCODING = "utf-8"
+        PROJECT_DIR = "C:/Users/kapil/OneDrive/Desktop/xplane_predictive_project"
+        PYTHON = "C:/Users/kapil/AppData/Local/Programs/Python/Python311/python.exe"
+    }
+
+    stages {
+
+        stage('Install Dependencies') {
+            steps {
+                echo "Installing required Python packages..."
+                bat """
+                "%PYTHON%" -m pip install --upgrade pip
+                "%PYTHON%" -m pip install -r "%PROJECT_DIR%/requirements.txt"
+                """
+            }
+        }
+
+        stage('Validate Models') {
+            steps {
+                echo "Validating model files (XGBoost + LSTM)..."
+                bat """
+                "%PYTHON%" -X utf8 -c "import joblib, tensorflow as tf, os; \
+xgb=r'%PROJECT_DIR%/models/xplane_xgboost.pkl'; \
+lstm=r'%PROJECT_DIR%/models/xplane_lstm.h5'; \
+assert os.path.exists(xgb), 'Missing XGBoost model!'; \
+assert os.path.exists(lstm), 'Missing LSTM model!'; \
+joblib.load(xgb); tf.keras.models.load_model(lstm); \
+print('✅ Models validated successfully.')"
+                """
+            }
+        }
+
+        stage('Launch Streamlit Dashboard') {
+            steps {
+                echo "Starting Streamlit dashboard..."
+                bat """
+                echo Killing any previous Streamlit processes...
+                taskkill /F /IM streamlit.exe /T >nul 2>&1
+
+                echo Launching Streamlit in background...
+                start "" cmd /c "start /min %PYTHON% -m streamlit run %PROJECT_DIR%/src/live_app.py --server.port=8501 --server.headless true"
+                echo ✅ Streamlit launched successfully on port 8501
+                exit /b 0
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Deployment successful! Access your dashboard at http://localhost:8501"
+        }
+        failure {
+            echo "❌ Build failed. Check Jenkins console for logs."
+        }
+    }
+}
