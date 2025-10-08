@@ -101,7 +101,7 @@ Streamlit → Live dashboard for predictions.
 
 Flask/FastAPI → REST endpoint for failure probability.
 
-Integrate CI/CD (GitHub Actions/Jenkins) for automation.
+Integrate CI/CD (/Jenkins) for deployment.
 
 8. Monitoring
 
