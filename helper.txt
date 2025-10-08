@@ -1,0 +1,9 @@
+stage('Launch Streamlit Dashboard') {
+    steps {
+        echo "Launching Streamlit dashboard (detached mode)..."
+        bat """
+        powershell -Command "Start-Process '%PYTHON%' -ArgumentList '-m streamlit run \"%PROJECT_DIR%/src/live_app.py\" --server.port=8501 --server.headless true' -WindowStyle Minimized -Verb RunAs"
+        """
+        echo "✅ Streamlit launched successfully. Visit http://localhost:8501"
+    }
+}
