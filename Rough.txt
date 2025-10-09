@@ -1,17 +1,260 @@
-# -----------------------------------
-# 🔁 Always update gauge after simulator (even outside expander)
-# -----------------------------------
-if "last_sim_prob" in st.session_state:
-    sim_prob = st.session_state["last_sim_prob"]
-    render_gauge(sim_prob, green_threshold, yellow_threshold)
+# ======================================================
+# ✈️ X-PLANE PREDICTIVE MAINTENANCE STREAMLIT APP (Real-Time + Interactive Simulator)
+# ======================================================
+import os
+import time
+from datetime import datetime
+import joblib
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import streamlit as st
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import confusion_matrix, roc_curve, auc
+from tensorflow.keras.models import load_model
+from zoneinfo import ZoneInfo
 
-    zone_txt, color, desc = zone_label(sim_prob, green_threshold, yellow_threshold)
-    status_area.markdown(f"""
-        <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,0.03);
-            border-left:6px solid {color};box-shadow:0 0 18px {color}60;">
-        <h3 style="margin:0;color:{color};font-size:22px">{zone_txt} (Simulator)</h3>
-        <p style="margin:4px 0;font-size:14px;color:white">{desc}</p>
-        <p style="margin:4px 0;color:lightgray">
-        Combined Probability: <b style="color:{color}">{sim_prob:.3f}</b></p>
-        </div>
-    """, unsafe_allow_html=True)
+# ---------- CONFIG / PATHS ----------
+XGB_MODEL_PATH = r"C:\Users\T8630\Desktop\xplane_predictive_project\models\xplane_xgboost.pkl"
+LSTM_MODEL_PATH = r"C:\Users\T8630\Desktop\xplane_predictive_project\models\xplane_lstm.h5"
+SCALER_PATH = r"C:\Users\T8630\Desktop\xplane_predictive_project\models\lstm_scaler.pkl"
+DATA_PATH = r"C:\Users\T8630\Desktop\xplane_predictive_project\data\processed\xplane_features.csv"
+DEFAULT_LSTM_TIMESTEPS = 50
+LOG_OUT_PATH = r"C:\Users\T8630\Desktop\xplane_predictive_project\data\live_log.csv"
+
+# ---------- APP CONFIG ----------
+st.set_page_config(page_title="✈️ X-Plane Predictive Maintenance", layout="wide")
+
+# ---------- LOAD MODELS ----------
+@st.cache_resource
+def load_xgb_model(path=XGB_MODEL_PATH):
+    if not os.path.exists(path):
+        return None, 0.5
+    data = joblib.load(path)
+    if isinstance(data, dict):
+        model = data.get("model", data)
+        threshold = data.get("threshold", 0.5)
+    else:
+        model, threshold = data, 0.5
+    return model, threshold
+
+@st.cache_resource
+def load_lstm_model(path=LSTM_MODEL_PATH):
+    return load_model(path) if os.path.exists(path) else None
+
+@st.cache_resource
+def load_scaler(path=SCALER_PATH):
+    return joblib.load(path) if os.path.exists(path) else None
+
+# ---------- UTILS ----------
+def clean_features_for_model(row_df, drop_cols=("failure",)):
+    df = row_df.copy()
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+    for c in drop_cols:
+        if c in df.columns:
+            df = df.drop(columns=[c])
+    for c in df.columns:
+        if df[c].dtype == object:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+    return df.select_dtypes(include=[np.number])
+
+def live_stream(file_path=DATA_PATH):
+    if not os.path.exists(file_path):
+        return
+    for row in pd.read_csv(file_path, chunksize=1):
+        yield row
+
+# ---------- GAUGE ----------
+def render_gauge(prob, g_thresh, y_thresh):
+    prob = float(np.clip(prob, 0.0, 1.0))
+    if prob <= g_thresh:
+        bar_color, bg_color, pulse_strength = "#15FF00", "rgba(0, 200, 0, 0.5)", 0.1
+    elif prob <= y_thresh:
+        bar_color, bg_color, pulse_strength = "#FFD700", "rgba(255, 215, 0, 0.25)", 0.3
+    else:
+        bar_color, bg_color, pulse_strength = "#FF4C4C", "rgba(255, 0, 0, 0.3)", 0.6
+
+    pulse_phase = (time.time() * 2.5) % (2 * np.pi)
+    pulse_alpha = 0.25 + pulse_strength * (0.5 + 0.5 * np.sin(pulse_phase))
+    glow_rgba = f"rgba(255, 0, 0, {pulse_alpha:.2f})" if prob > y_thresh else bg_color
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=prob,
+        number={'font': {'color': 'white', 'size': 44}},
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': "Failure Probability", 'font': {'size': 22, 'color': 'white'}},
+        gauge={
+            'axis': {'range': [0, 1], 'tickcolor': 'white'},
+            'bar': {'color': bar_color, 'thickness': 0.35},
+            'steps': [
+                {'range': [0, g_thresh], 'color': '#003300'},
+                {'range': [g_thresh, y_thresh], 'color': '#705900'},
+                {'range': [y_thresh, 1.0], 'color': '#4D0000'}
+            ],
+            'threshold': {'line': {'color': "#000", 'width': 5}, 'value': prob}
+        }
+    ))
+
+    fig.update_layout(
+        height=360,
+        margin=dict(t=60, b=40, l=40, r=40),
+        paper_bgcolor=glow_rgba,
+        plot_bgcolor="#0E1117",
+        font={'color': 'white'}
+    )
+    st.session_state["gauge_placeholder"].plotly_chart(fig, use_container_width=True, key=f"gauge_{time.time_ns()}")
+
+def zone_label(prob, g_thresh, y_thresh):
+    if prob <= g_thresh:
+        return "🟢 STABLE", "green", "Engine is operating normally."
+    elif prob <= y_thresh:
+        return "🟡 LOW RISK", "gold", "Minor anomalies detected."
+    else:
+        return "🔴 HIGH RISK", "red", "Potential failure detected!"
+
+# ---------- MAIN ----------
+st.sidebar.header("Mode Selection")
+mode = st.sidebar.radio("Choose mode", ["📡 Real-Time Streaming", "🕹️ Telemetry Simulator"])
+
+xgb_model, saved_threshold = load_xgb_model()
+lstm_model = load_lstm_model()
+scaler = load_scaler()
+
+# ---------- REAL-TIME STREAMING ----------
+if mode == "📡 Real-Time Streaming":
+    st.title("📡 Real-Time Predictive Maintenance Dashboard")
+    st.sidebar.subheader("🔧 Stream Controls")
+    refresh_rate = st.sidebar.slider("Refresh Interval (s)", 0.5, 10.0, 1.0, 0.5)
+    start_stream = st.sidebar.button("▶ Start Live Streaming")
+    stop_stream = st.sidebar.button("■ Stop Live Streaming")
+
+    green_threshold = st.sidebar.slider("🟢 Green Zone", 0.0, 1.0, 0.5, 0.01)
+    yellow_threshold = st.sidebar.slider("🟡 Yellow Zone", green_threshold, 1.0, 0.75, 0.01)
+
+    col_left, col_right = st.columns([2, 1])
+    with col_left:
+        st.session_state["gauge_placeholder"] = st.empty()
+        chart_xgb = st.line_chart(pd.DataFrame(columns=["xgb_prob"]))
+        chart_lstm = st.line_chart(pd.DataFrame(columns=["lstm_prob"]))
+    with col_right:
+        st.session_state["status_area"] = st.empty()
+
+    if start_stream:
+        st.session_state.stream_running = True
+    if stop_stream:
+        st.session_state.stream_running = False
+
+    if st.session_state.get("stream_running", False):
+        last_prob = 0.0
+        for row in live_stream():
+            features = clean_features_for_model(row)
+            xgb_prob = float(xgb_model.predict_proba(features)[0][1])
+            scaled = scaler.transform(features)
+            if "seq_buf" not in st.session_state:
+                st.session_state.seq_buf = []
+            st.session_state.seq_buf.append(scaled.flatten())
+            lstm_prob = float(lstm_model.predict(
+                np.array(st.session_state.seq_buf[-DEFAULT_LSTM_TIMESTEPS:]).reshape(1, DEFAULT_LSTM_TIMESTEPS, features.shape[1]),
+                verbose=0)[0][0]) if len(st.session_state.seq_buf) >= DEFAULT_LSTM_TIMESTEPS else 0.0
+
+            combined = xgb_prob + lstm_prob
+            smooth = last_prob + (combined - last_prob)
+            last_prob = smooth
+
+            render_gauge(smooth, green_threshold, yellow_threshold)
+            chart_xgb.add_rows(pd.DataFrame({"xgb_prob": [xgb_prob]}))
+            chart_lstm.add_rows(pd.DataFrame({"lstm_prob": [lstm_prob]}))
+            zone_txt, color, desc = zone_label(smooth, green_threshold, yellow_threshold)
+            st.session_state["status_area"].markdown(
+                f"<h3 style='color:{color}'>{zone_txt}</h3><p>{desc}</p><b>{smooth:.3f}</b>",
+                unsafe_allow_html=True)
+            time.sleep(refresh_rate)
+
+# ---------- TELEMETRY SIMULATOR ----------
+if mode == "🕹️ Telemetry Simulator":
+    st.title("🕹️ Interactive Telemetry Simulator")
+    st.sidebar.write("Adjust engine parameters and failure conditions below:")
+
+    # Gauge + Graph placeholders
+    col_left, col_right = st.columns([2, 1])
+    with col_left:
+        st.session_state["gauge_placeholder"] = st.empty()
+        chart_xgb = st.line_chart(pd.DataFrame(columns=["xgb_prob"]))
+        chart_lstm = st.line_chart(pd.DataFrame(columns=["lstm_prob"]))
+    with col_right:
+        st.session_state["status_area"] = st.empty()
+
+    # Feature sliders
+    power_1hp = st.slider("Power 1 (hp)", 0, 500, 200)
+    power_2hp = st.slider("Power 2 (hp)", 0, 500, 200)
+    thrst_1lb = st.slider("Thrust 1 (lb)", 0, 2000, 400)
+    thrst_2lb = st.slider("Thrust 2 (lb)", 0, 2000, 400)
+    rpm_1engin = st.slider("RPM 1", 0, 8000, 2000)
+    rpm_2engin = st.slider("RPM 2", 0, 8000, 2000)
+    N1__1_pcnt = st.slider("N1 Engine 1 (%)", 0, 100, 50)
+    N1__2_pcnt = st.slider("N1 Engine 2 (%)", 0, 100, 50)
+    N2__1_pcnt = st.slider("N2 Engine 1 (%)", 0, 100, 50)
+    N2__2_pcnt = st.slider("N2 Engine 2 (%)", 0, 100, 50)
+    EGT_1__deg = st.slider("EGT 1 (°C)", 0, 1200, 600)
+    EGT_2__deg = st.slider("EGT 2 (°C)", 0, 1200, 600)
+    OILT1__deg = st.slider("Oil Temp 1 (°C)", 0, 200, 90)
+    OILT2__deg = st.slider("Oil Temp 2 (°C)", 0, 200, 90)
+    FUEP1__psi = st.slider("Fuel Pressure 1 (psi)", 0, 100, 30)
+    FUEP2__psi = st.slider("Fuel Pressure 2 (psi)", 0, 100, 30)
+    batt1__amp = st.slider("Battery 1 (A)", 0, 50, 10)
+    batt2__amp = st.slider("Battery 2 (A)", 0, 50, 10)
+    batt1_volt = st.slider("Battery 1 Voltage", 0, 50, 24)
+    batt2_volt = st.slider("Battery 2 Voltage", 0, 50, 24)
+
+    sim_row = {
+        "power_1hp": power_1hp, "power_2hp": power_2hp,
+        "thrst_1lb": thrst_1lb, "thrst_2lb": thrst_2lb,
+        "rpm_1engin": rpm_1engin, "rpm_2engin": rpm_2engin,
+        "N1__1_pcnt": N1__1_pcnt, "N1__2_pcnt": N1__2_pcnt,
+        "N2__1_pcnt": N2__1_pcnt, "N2__2_pcnt": N2__2_pcnt,
+        "EGT_1__deg": EGT_1__deg, "EGT_2__deg": EGT_2__deg,
+        "OILT1__deg": OILT1__deg, "OILT2__deg": OILT2__deg,
+        "FUEP1__psi": FUEP1__psi, "FUEP2__psi": FUEP2__psi,
+        "batt1__amp": batt1__amp, "batt2__amp": batt2__amp,
+        "batt1_volt": batt1_volt, "batt2_volt": batt2_volt
+    }
+
+    # === Run identical logic as Real-Time Streaming ===
+    try:
+        row = pd.DataFrame([sim_row])
+        features = clean_features_for_model(row)
+
+        # XGBoost
+        xgb_prob = float(xgb_model.predict_proba(features)[0][1])
+
+        # LSTM
+        scaled = scaler.transform(features)
+        if "sim_seq" not in st.session_state:
+            st.session_state.sim_seq = []
+        st.session_state.sim_seq.append(scaled.flatten())
+
+        if len(st.session_state.sim_seq) >= DEFAULT_LSTM_TIMESTEPS:
+            lstm_input = np.array(st.session_state.sim_seq[-DEFAULT_LSTM_TIMESTEPS:]).reshape(
+                1, DEFAULT_LSTM_TIMESTEPS, features.shape[1]
+            )
+            lstm_prob = float(lstm_model.predict(lstm_input, verbose=0)[0][0])
+        else:
+            lstm_prob = 0.0
+
+        combined = xgb_prob + lstm_prob
+        last_prob = st.session_state.get("last_sim_prob", combined)
+        smooth = last_prob + (combined - last_prob)
+        st.session_state["last_sim_prob"] = smooth
+
+        render_gauge(smooth, 0.5, 0.75)
+        chart_xgb.add_rows(pd.DataFrame({"xgb_prob": [xgb_prob]}))
+        chart_lstm.add_rows(pd.DataFrame({"lstm_prob": [lstm_prob]}))
+        zone_txt, color, desc = zone_label(smooth, 0.5, 0.75)
+        st.session_state["status_area"].markdown(
+            f"<h3 style='color:{color}'>{zone_txt}</h3><p>{desc}</p><b>{smooth:.3f}</b>",
+            unsafe_allow_html=True)
+
+    except Exception as e:
+        st.error(f"❌ Simulation Error: {e}")
