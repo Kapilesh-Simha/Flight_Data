@@ -1,37 +1,38 @@
 # =====================================
-# 📈 DYNAMIC CHART UPDATE (Telemetry Simulator)
+# 📈 FIXED DYNAMIC CHART UPDATE (Telemetry Simulator)
 # =====================================
 
-# ✅ Safe initialization of all session_state variables
-for key in [
-    "sim_chart_xgb",
-    "sim_chart_lstm",
-    "sim_chart_xgb_data",
-    "sim_chart_lstm_data"
-]:
-    if key not in st.session_state:
-        if "data" in key:
-            st.session_state[key] = []
-        else:
-            st.session_state[key] = st.line_chart(
-                pd.DataFrame(columns=[key.replace("sim_chart_", "").replace("_", " ").upper()])
-            )
+# Create persistent chart placeholders once
+if "sim_chart_xgb_ph" not in st.session_state:
+    st.session_state.sim_chart_xgb_ph = st.empty()
+if "sim_chart_lstm_ph" not in st.session_state:
+    st.session_state.sim_chart_lstm_ph = st.empty()
 
-# Append new data safely
+# Initialize stored data lists
+if "sim_chart_xgb_data" not in st.session_state:
+    st.session_state.sim_chart_xgb_data = []
+if "sim_chart_lstm_data" not in st.session_state:
+    st.session_state.sim_chart_lstm_data = []
+
+# Append new probabilities
 st.session_state.sim_chart_xgb_data.append(xgb_prob)
 st.session_state.sim_chart_lstm_data.append(lstm_prob)
 
-# Keep the last 50 samples only (smooth scroll)
+# Keep the last 50 points
 st.session_state.sim_chart_xgb_data = st.session_state.sim_chart_xgb_data[-50:]
 st.session_state.sim_chart_lstm_data = st.session_state.sim_chart_lstm_data[-50:]
 
 # Convert to DataFrames
-df_xgb = pd.DataFrame(st.session_state.sim_chart_xgb_data, columns=["XGBoost Failure Probability"])
-df_lstm = pd.DataFrame(st.session_state.sim_chart_lstm_data, columns=["LSTM Failure Probability"])
+df_xgb = pd.DataFrame(
+    {"XGBoost Failure Probability": st.session_state.sim_chart_xgb_data}
+)
+df_lstm = pd.DataFrame(
+    {"LSTM Failure Probability": st.session_state.sim_chart_lstm_data}
+)
 
-# Display charts side by side for better visual alignment
+# Draw charts properly (using placeholders, not persistent charts)
 col_xgb, col_lstm = st.columns(2)
 with col_xgb:
-    st.session_state.sim_chart_xgb.line_chart(df_xgb)
+    st.session_state.sim_chart_xgb_ph.line_chart(df_xgb)
 with col_lstm:
-    st.session_state.sim_chart_lstm.line_chart(df_lstm)
+    st.session_state.sim_chart_lstm_ph.line_chart(df_lstm)
