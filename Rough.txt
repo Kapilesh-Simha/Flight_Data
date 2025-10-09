@@ -1,0 +1,31 @@
+# ---- Immediately reflect simulator outputs on gauge & status ----
+try:
+    render_gauge(smooth_sim_prob, green_threshold, yellow_threshold)
+    zone_txt, color, desc = (
+        "🟢 STABLE", "green", "Engine parameters nominal and stable ✅"
+        if smooth_sim_prob <= green_threshold else
+        ("🟡 LOW RISK", "gold", "Minor anomalies detected ⚠️" if smooth_sim_prob <= yellow_threshold else
+         ("🔴 HIGH RISK", "red", "Potential failure detected ❗"))
+    )
+    # Display simulator status beside gauge
+    st.markdown(f"""
+    <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,0.03);
+        border-left:6px solid {color};box-shadow:0 0 18px {color}60;">
+    <h3 style="margin:0;color:{color};font-size:22px">{zone_txt} (Simulator)</h3>
+    <p style="margin:4px 0;font-size:14px;color:white">{desc}</p>
+    <p style="margin:4px 0;color:lightgray">
+    Combined Probability: <b style="color:{color}">{smooth_sim_prob:.3f}</b></p>
+    <hr style="border:1px solid rgba(255,255,255,0.06)">
+    <h4 style="color:white;margin-bottom:4px;">Simulator Telemetry Snapshot</h4>
+    <ul style="list-style:none;padding-left:8px;color:#dcdcdc;font-size:14px;line-height:1.4;">
+        <li><b>Throttle:</b> {throttle:.0f}%</li>
+        <li><b>Power (1/2 hp):</b> {st.session_state.sim_vals['power_1hp']:.1f} / {st.session_state.sim_vals['power_2hp']:.1f}</li>
+        <li><b>Thrust (1/2 lb):</b> {st.session_state.sim_vals['thrst_1lb']:.1f} / {st.session_state.sim_vals['thrst_2lb']:.1f}</li>
+        <li><b>RPM (1/2):</b> {st.session_state.sim_vals['rpm_1engin']:.0f} / {st.session_state.sim_vals['rpm_2engin']:.0f}</li>
+        <li><b>EGT (1/2 °C):</b> {st.session_state.sim_vals['EGT_1__deg']:.1f} / {st.session_state.sim_vals['EGT_2__deg']:.1f}</li>
+        <li><b>Fuel Press (1/2 psi):</b> {st.session_state.sim_vals['FUEP1__psi']:.1f} / {st.session_state.sim_vals['FUEP2__psi']:.1f}</li>
+    </ul>
+    </div>
+    """, unsafe_allow_html=True)
+except Exception as e:
+    st.warning(f"Simulator visualization error: {e}")
