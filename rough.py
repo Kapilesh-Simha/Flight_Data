@@ -1,10 +1,9 @@
 # ======================================================
-# ✈️ X-PLANE PREDICTIVE MAINTENANCE STREAMLIT APP (Unified + Enhanced + Simulator)
+# ✈️ X-PLANE PREDICTIVE MAINTENANCE STREAMLIT APP (Merged + Corrected)
 # ======================================================
 import os
 import time
 from datetime import datetime
-import io
 import joblib
 import numpy as np
 import pandas as pd
@@ -178,225 +177,9 @@ if mode == "📡 Real-Time Streaming":
         st.session_state["log_enabled"] = not st.session_state.get("log_enabled", False)
         st.success("Logging Enabled" if st.session_state["log_enabled"] else "Logging Disabled")
 
-    # ---------------- SIMULATOR: START ----------------
-    sim_exp = st.sidebar.expander("🕹️ Telemetry Simulator (Interactive)", expanded=False)
-
-    with sim_exp:
-        st.markdown("Use the sliders and toggles to simulate telemetry. Predictions use both XGBoost + LSTM like real streaming.")
-        # Throttle/main controls
-        throttle = st.slider("Throttle Level (%)", 0, 100, 50, 1,
-                             help="Global throttle level. This will influence power, thrust and rpm (simple mapping).", key="sim_throttle")
-        auto_map = st.checkbox("Auto-map throttle -> power/thrust/RPM", value=True, key="sim_auto_map",
-                               help="When enabled, changing throttle will automatically change some telemetry values.")
-
-        # Failure toggles (checkboxes)
-        st.markdown("**Simulated Failure Modes**")
-        f_overheat = st.checkbox("Engine Overheat", value=False, help="Simulate engine overheat (increases EGTs)", key="sim_fail_overheat")
-        f_fuel_restrict = st.checkbox("Fuel Restriction", value=False, help="Simulate fuel restriction (reduces fuel pressure & power)", key="sim_fail_fuel_restrict")
-        f_elec_pump = st.checkbox("Electronic Fuel Pump Failure", value=False, help="Simulate EFI pump failure (lowers FUEP psi)", key="sim_fail_pump")
-
-        st.markdown("---")
-        # Feature sliders (use help parameter for hover tooltip)
-        # Keep the order exact as your model expects:
-        feature_defaults = {
-            "power_1hp": 200.0, "power_2hp": 200.0,
-            "thrst_1lb": 400.0, "thrst_2lb": 400.0,
-            "rpm_1engin": 2000.0, "rpm_2engin": 2000.0,
-            "N1__1_pcnt": 50.0, "N1__2_pcnt": 50.0,
-            "N2__1_pcnt": 50.0, "N2__2_pcnt": 50.0,
-            "EGT_1__deg": 600.0, "EGT_2__deg": 600.0,
-            "OILT1__deg": 90.0, "OILT2__deg": 90.0,
-            "FUEP1__psi": 30.0, "FUEP2__psi": 30.0,
-            "batt1__amp": 10.0, "batt2__amp": 10.0,
-            "batt1_volt": 24.0, "batt2_volt": 24.0
-        }
-
-        # Load or initialize session_state for simulator values
-        if "sim_vals" not in st.session_state:
-            st.session_state.sim_vals = feature_defaults.copy()
-
-        # UI inputs for each feature
-        # For compact UI place in two columns
-        col_a, col_b = st.columns(2)
-        with col_a:
-            p1 = st.slider("power_1hp", 0.0, 500.0, float(st.session_state.sim_vals["power_1hp"]),
-                           help="Engine 1 power (hp).", key="sim_power_1hp")
-            thr1 = st.slider("thrst_1lb", 0.0, 2000.0, float(st.session_state.sim_vals["thrst_1lb"]),
-                             help="Thrust engine 1 (lb).", key="sim_thrst_1lb")
-            rpm1 = st.slider("rpm_1engin", 0.0, 8000.0, float(st.session_state.sim_vals["rpm_1engin"]),
-                             help="RPM engine 1.", key="sim_rpm_1engin")
-            n1_1 = st.slider("N1__1_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N1__1_pcnt"]),
-                             help="N1 % engine 1.", key="sim_N1_1")
-            n2_1 = st.slider("N2__1_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N2__1_pcnt"]),
-                             help="N2 % engine 1.", key="sim_N2_1")
-            egt1 = st.slider("EGT_1__deg", 0.0, 1200.0, float(st.session_state.sim_vals["EGT_1__deg"]),
-                             help="Exhaust Gas Temp engine 1 (°C).", key="sim_EGT_1")
-            oilt1 = st.slider("OILT1__deg", -40.0, 200.0, float(st.session_state.sim_vals["OILT1__deg"]),
-                              help="Oil temp engine 1 (°C).", key="sim_OILT1")
-            fuep1 = st.slider("FUEP1__psi", 0.0, 100.0, float(st.session_state.sim_vals["FUEP1__psi"]),
-                              help="Fuel press engine 1 (psi).", key="sim_FUEP1")
-        with col_b:
-            p2 = st.slider("power_2hp", 0.0, 500.0, float(st.session_state.sim_vals["power_2hp"]),
-                           help="Engine 2 power (hp).", key="sim_power_2hp")
-            thr2 = st.slider("thrst_2lb", 0.0, 2000.0, float(st.session_state.sim_vals["thrst_2lb"]),
-                             help="Thrust engine 2 (lb).", key="sim_thrst_2lb")
-            rpm2 = st.slider("rpm_2engin", 0.0, 8000.0, float(st.session_state.sim_vals["rpm_2engin"]),
-                             help="RPM engine 2.", key="sim_rpm_2engin")
-            n1_2 = st.slider("N1__2_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N1__2_pcnt"]),
-                             help="N1 % engine 2.", key="sim_N1_2")
-            n2_2 = st.slider("N2__2_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N2__2_pcnt"]),
-                             help="N2 % engine 2.", key="sim_N2_2")
-            egt2 = st.slider("EGT_2__deg", 0.0, 1200.0, float(st.session_state.sim_vals["EGT_2__deg"]),
-                             help="Exhaust Gas Temp engine 2 (°C).", key="sim_EGT_2")
-            oilt2 = st.slider("OILT2__deg", -40.0, 200.0, float(st.session_state.sim_vals["OILT2__deg"]),
-                              help="Oil temp engine 2 (°C).", key="sim_OILT2")
-            fuep2 = st.slider("FUEP2__psi", 0.0, 100.0, float(st.session_state.sim_vals["FUEP2__psi"]),
-                              help="Fuel press engine 2 (psi).", key="sim_FUEP2")
-
-        # battery fields
-        b1_amp = st.number_input("batt1__amp", value=float(st.session_state.sim_vals["batt1__amp"]), step=1.0,
-                                 help="Battery 1 current (A)", key="sim_batt1_amp")
-        b2_amp = st.number_input("batt2__amp", value=float(st.session_state.sim_vals["batt2__amp"]), step=1.0,
-                                 help="Battery 2 current (A)", key="sim_batt2_amp")
-        b1_volt = st.number_input("batt1_volt", value=float(st.session_state.sim_vals["batt1_volt"]), step=0.1,
-                                  help="Battery 1 voltage", key="sim_batt1_volt")
-        b2_volt = st.number_input("batt2_volt", value=float(st.session_state.sim_vals["batt2_volt"]), step=0.1,
-                                  help="Battery 2 voltage", key="sim_batt2_volt")
-
-        # Reset button
-        if st.button("🔄 Reset Simulator", key="sim_reset"):
-            st.session_state.sim_vals = feature_defaults.copy()
-            st.session_state.sim_seq = []  # clear LSTM buffer
-            st.experimental_rerun()
-
-        # Update session_state.sim_vals with current values
-        st.session_state.sim_vals.update({
-            "power_1hp": p1, "power_2hp": p2,
-            "thrst_1lb": thr1, "thrst_2lb": thr2,
-            "rpm_1engin": rpm1, "rpm_2engin": rpm2,
-            "N1__1_pcnt": n1_1, "N1__2_pcnt": n1_2,
-            "N2__1_pcnt": n2_1, "N2__2_pcnt": n2_2,
-            "EGT_1__deg": egt1, "EGT_2__deg": egt2,
-            "OILT1__deg": oilt1, "OILT2__deg": oilt2,
-            "FUEP1__psi": fuep1, "FUEP2__psi": fuep2,
-            "batt1__amp": b1_amp, "batt2__amp": b2_amp,
-            "batt1_volt": b1_volt, "batt2_volt": b2_volt
-        })
-
-        # Apply simple throttle mapping if enabled
-        if auto_map:
-            # Basic linear mapping: throttle 0-100 -> scale 0.5-1.05 for power and thrust, rpm scaled similarly
-            s = 0.5 + 0.55 * (throttle / 100.0)
-            st.session_state.sim_vals["power_1hp"] = max(0.0, st.session_state.sim_vals["power_1hp"] * (s))
-            st.session_state.sim_vals["power_2hp"] = max(0.0, st.session_state.sim_vals["power_2hp"] * (s))
-            st.session_state.sim_vals["thrst_1lb"] = max(0.0, st.session_state.sim_vals["thrst_1lb"] * (s))
-            st.session_state.sim_vals["thrst_2lb"] = max(0.0, st.session_state.sim_vals["thrst_2lb"] * (s))
-            st.session_state.sim_vals["rpm_1engin"] = max(0.0, st.session_state.sim_vals["rpm_1engin"] * (0.8 + 0.4*(throttle/100.0)))
-            st.session_state.sim_vals["rpm_2engin"] = max(0.0, st.session_state.sim_vals["rpm_2engin"] * (0.8 + 0.4*(throttle/100.0)))
-
-        # Apply failure-mode influences
-        if f_overheat:
-            st.session_state.sim_vals["EGT_1__deg"] += 150.0
-            st.session_state.sim_vals["EGT_2__deg"] += 150.0
-            st.session_state.sim_vals["OILT1__deg"] += 20.0
-            st.session_state.sim_vals["OILT2__deg"] += 20.0
-        if f_fuel_restrict:
-            st.session_state.sim_vals["FUEP1__psi"] *= 0.5
-            st.session_state.sim_vals["FUEP2__psi"] *= 0.5
-            st.session_state.sim_vals["power_1hp"] *= 0.7
-            st.session_state.sim_vals["power_2hp"] *= 0.7
-        if f_elec_pump:
-            st.session_state.sim_vals["FUEP1__psi"] *= 0.3
-            st.session_state.sim_vals["FUEP2__psi"] *= 0.3
-
-        # Build feature vector in the exact order required by the models
-        sim_feature_order = [
-            "power_1hp","power_2hp","thrst_1lb","thrst_2lb",
-            "rpm_1engin","rpm_2engin","N1__1_pcnt","N1__2_pcnt",
-            "N2__1_pcnt","N2__2_pcnt","EGT_1__deg","EGT_2__deg",
-            "OILT1__deg","OILT2__deg","FUEP1__psi","FUEP2__psi",
-            "batt1__amp","batt2__amp","batt1_volt","batt2_volt"
-        ]
-        sim_row = {k: float(st.session_state.sim_vals.get(k, 0.0)) for k in sim_feature_order}
-
-        # Now run model inference using BOTH models (XGBoost + LSTM) - matching your streaming behaviour
-        try:
-            # XGBoost probability
-            sim_df = pd.DataFrame([sim_row])
-            # Ensure same numeric columns as XGB expects (guard)
-            try:
-                feat_names = list(xgb_model.feature_names_in_)
-                sim_df = sim_df.reindex(columns=feat_names, fill_value=0.0)
-            except Exception:
-                pass
-            if xgb_model is not None:
-                # if model expects a 2D array of values, ensure correct shape
-                try:
-                    xgb_prob = float(xgb_model.predict_proba(sim_df.values)[0][1])
-                except Exception:
-                    # fallback to DataFrame input if xgb supports it
-                    xgb_prob = float(xgb_model.predict_proba(sim_df)[0][1])
-            else:
-                xgb_prob = 0.0
-        except Exception as e:
-            xgb_prob = 0.0
-
-        try:
-            # LSTM: scale and create / update sequence buffer in session state
-            if scaler is not None:
-                # Keep only numeric columns expected by scaler
-                try:
-                    expected = getattr(scaler, "feature_names_in_", None)
-                    if expected is not None:
-                        arr = np.array([sim_row.get(c, 0.0) for c in expected], dtype=float).reshape(1, -1)
-                    else:
-                        arr = np.array([sim_row[c] for c in sim_feature_order], dtype=float).reshape(1, -1)
-                except Exception:
-                    arr = np.array([sim_row[c] for c in sim_feature_order], dtype=float).reshape(1, -1)
-                arr_scaled = scaler.transform(arr).reshape(-1)  # 1D row
-            else:
-                arr_scaled = np.array([sim_row[c] for c in sim_feature_order], dtype=float).reshape(-1)
-
-            # maintain sim_seq buffer
-            if "sim_seq" not in st.session_state:
-                st.session_state.sim_seq = []
-            st.session_state.sim_seq.append(arr_scaled)
-            # keep at most DEFAULT_LSTM_TIMESTEPS
-            if len(st.session_state.sim_seq) > DEFAULT_LSTM_TIMESTEPS:
-                st.session_state.sim_seq = st.session_state.sim_seq[-DEFAULT_LSTM_TIMESTEPS:]
-
-            # prepare sequence: if too short, pad by repeating last row
-            seq_len = len(st.session_state.sim_seq)
-            if seq_len < DEFAULT_LSTM_TIMESTEPS:
-                pad_count = DEFAULT_LSTM_TIMESTEPS - seq_len
-                pad = [st.session_state.sim_seq[0]] * pad_count if seq_len > 0 else [arr_scaled] * pad_count
-                seq_arr = np.stack(pad + st.session_state.sim_seq, axis=0)
-            else:
-                seq_arr = np.stack(st.session_state.sim_seq[-DEFAULT_LSTM_TIMESTEPS:], axis=0)
-
-            # reshape (1, timesteps, features)
-            lstm_input = seq_arr.reshape(1, seq_arr.shape[0], seq_arr.shape[1])
-            if lstm_model is not None:
-                lstm_prob = float(lstm_model.predict(lstm_input, verbose=0)[0][0])
-            else:
-                lstm_prob = 0.0
-        except Exception as e:
-            lstm_prob = 0.0
-
-        # Combine probabilities (same as your streaming logic)
-        combined_prob = float((xgb_prob + lstm_prob))
-        # Smooth or directly use combined. We'll follow streaming smoothing by storing last_sim_prob
-        last_sim_prob = st.session_state.get("last_sim_prob", combined_prob)
-        smooth_sim_prob = last_sim_prob + (combined_prob - last_sim_prob)
-        st.session_state["last_sim_prob"] = smooth_sim_prob
-
-        # Update the gauge & charts immediately (reuse your render_gauge and chart objects)
-        # NOTE: your layout uses chart_xgb and chart_lstm defined later; we will try to update them if they exist
-        # They will be updated again when layout is created below and streaming runs.
-        # Update status_area (reuse your status_area placeholder when available) - this is attempted later in run.
-    # ---------------- SIMULATOR: END ----------------
-
-    # Layout
+    # ------------------------------
+    # Layout + placeholders (ensure these exist before simulator)
+    # ------------------------------
     col_left, col_right = st.columns([2,1])
     with col_left:
         gauge_ph = st.empty()
@@ -409,21 +192,19 @@ if mode == "📡 Real-Time Streaming":
     if "stream_running" not in st.session_state:
         st.session_state.stream_running = False
 
+    # ---------- rendering helpers (need access to gauge_ph)
     def render_gauge(prob, g_thresh, y_thresh):
-        """Animated cinematic gauge with glowing background that reacts to failure probability."""
         prob = float(np.clip(prob, 0.0, 1.0))
-
-        # Determine zone colors + glow intensity
         if prob <= g_thresh:
-            bar_color = "#15FF00"       # bright green
-            bg_color = "rgba(0, 200, 0, 0.5)"  # subtle green
+            bar_color = "#15FF00"
+            bg_color = "rgba(0, 200, 0, 0.5)"
             pulse_strength = 0.1
         elif prob <= y_thresh:
-            bar_color = "#FFD700"       # amber
+            bar_color = "#FFD700"
             bg_color = "rgba(255, 215, 0, 0.25)"
             pulse_strength = 0.3
         else:
-            bar_color = "#FF4C4C"       # bright red
+            bar_color = "#FF4C4C"
             bg_color = "rgba(255, 0, 0, 0.3)"
             pulse_strength = 0.6
 
@@ -431,7 +212,6 @@ if mode == "📡 Real-Time Streaming":
         pulse_alpha = 0.25 + pulse_strength * (0.5 + 0.5 * np.sin(pulse_phase))
         glow_rgba = f"rgba(255, 0, 0, {pulse_alpha:.2f})" if prob > y_thresh else bg_color
 
-        # Build the gauge
         fig = go.Figure(go.Indicator(
             mode="gauge+number",
             value=prob,
@@ -456,7 +236,6 @@ if mode == "📡 Real-Time Streaming":
             }
         ))
 
-        # Set layout with dynamic glow background
         fig.update_layout(
             height=360,
             margin=dict(t=60, b=40, l=40, r=40),
@@ -469,31 +248,248 @@ if mode == "📡 Real-Time Streaming":
         try:
             gauge_ph.plotly_chart(fig, use_container_width=True, key=f"gauge_{time.time_ns()}")
         except Exception:
-            # safe fallback if gauge_ph isn't available (shouldn't happen once layout is defined)
-            pass
+            # fallback safe: display as image-less
+            st.plotly_chart(fig, use_container_width=True)
 
     def zone_label(prob, g_thresh, y_thresh):
         if prob <= g_thresh:
             return "🟢 STABLE","green","Engine is operating normally! 😊"
         elif prob <= y_thresh:
-            return "🟡 LOW RISK","gold","Model has detected minor anomalies! "
+            return "🟡 LOW RISK","gold","Model has detected minor anomalies!"
         else:
-            return "🔴 HIGH RISK","red","Potential failure detected! Consider replacing the part before failure! "
+            return "🔴 HIGH RISK","red","Potential failure detected! Consider replacing the part before failure!"
 
+    # ------------------------------
+    # SIMULATOR: START (placed AFTER placeholders & render_gauge so calls succeed)
+    # ------------------------------
+    sim_exp = st.sidebar.expander("🕹️ Telemetry Simulator (Interactive)", expanded=False)
+
+    with sim_exp:
+        st.markdown("Use the sliders and toggles to simulate telemetry. Predictions use both XGBoost + LSTM like real streaming.")
+        throttle = st.slider("Throttle Level (%)", 0, 100, 50, 1, help="Global throttle level. This will influence power, thrust and rpm (simple mapping).", key="sim_throttle")
+        auto_map = st.checkbox("Auto-map throttle -> power/thrust/RPM", value=True, key="sim_auto_map", help="When enabled, changing throttle will automatically change some telemetry values.")
+
+        st.markdown("**Simulated Failure Modes**")
+        f_overheat = st.checkbox("Engine Overheat", value=False, help="Simulate engine overheat (increases EGTs)", key="sim_fail_overheat")
+        f_fuel_restrict = st.checkbox("Fuel Restriction", value=False, help="Simulate fuel restriction (reduces fuel pressure & power)", key="sim_fail_fuel_restrict")
+        f_elec_pump = st.checkbox("Electronic Fuel Pump Failure", value=False, help="Simulate EFI pump failure (lowers FUEP psi)", key="sim_fail_pump")
+
+        st.markdown("---")
+        feature_defaults = {
+            "power_1hp": 200.0, "power_2hp": 200.0,
+            "thrst_1lb": 400.0, "thrst_2lb": 400.0,
+            "rpm_1engin": 2000.0, "rpm_2engin": 2000.0,
+            "N1__1_pcnt": 50.0, "N1__2_pcnt": 50.0,
+            "N2__1_pcnt": 50.0, "N2__2_pcnt": 50.0,
+            "EGT_1__deg": 600.0, "EGT_2__deg": 600.0,
+            "OILT1__deg": 90.0, "OILT2__deg": 90.0,
+            "FUEP1__psi": 30.0, "FUEP2__psi": 30.0,
+            "batt1__amp": 10.0, "batt2__amp": 10.0,
+            "batt1_volt": 24.0, "batt2_volt": 24.0
+        }
+
+        if "sim_vals" not in st.session_state:
+            st.session_state.sim_vals = feature_defaults.copy()
+        if "sim_seq" not in st.session_state:
+            st.session_state.sim_seq = []
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            p1 = st.slider("power_1hp", 0.0, 500.0, float(st.session_state.sim_vals["power_1hp"]), help="Engine 1 power (hp).", key="sim_power_1hp")
+            thr1 = st.slider("thrst_1lb", 0.0, 2000.0, float(st.session_state.sim_vals["thrst_1lb"]), help="Thrust engine 1 (lb).", key="sim_thrst_1lb")
+            rpm1 = st.slider("rpm_1engin", 0.0, 8000.0, float(st.session_state.sim_vals["rpm_1engin"]), help="RPM engine 1.", key="sim_rpm_1engin")
+            n1_1 = st.slider("N1__1_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N1__1_pcnt"]), help="N1 % engine 1.", key="sim_N1_1")
+            n2_1 = st.slider("N2__1_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N2__1_pcnt"]), help="N2 % engine 1.", key="sim_N2_1")
+            egt1 = st.slider("EGT_1__deg", 0.0, 1200.0, float(st.session_state.sim_vals["EGT_1__deg"]), help="Exhaust Gas Temp engine 1 (°C).", key="sim_EGT_1")
+            oilt1 = st.slider("OILT1__deg", -40.0, 200.0, float(st.session_state.sim_vals["OILT1__deg"]), help="Oil temp engine 1 (°C).", key="sim_OILT1")
+            fuep1 = st.slider("FUEP1__psi", 0.0, 100.0, float(st.session_state.sim_vals["FUEP1__psi"]), help="Fuel press engine 1 (psi).", key="sim_FUEP1")
+        with col_b:
+            p2 = st.slider("power_2hp", 0.0, 500.0, float(st.session_state.sim_vals["power_2hp"]), help="Engine 2 power (hp).", key="sim_power_2hp")
+            thr2 = st.slider("thrst_2lb", 0.0, 2000.0, float(st.session_state.sim_vals["thrst_2lb"]), help="Thrust engine 2 (lb).", key="sim_thrst_2lb")
+            rpm2 = st.slider("rpm_2engin", 0.0, 8000.0, float(st.session_state.sim_vals["rpm_2engin"]), help="RPM engine 2.", key="sim_rpm_2engin")
+            n1_2 = st.slider("N1__2_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N1__2_pcnt"]), help="N1 % engine 2.", key="sim_N1_2")
+            n2_2 = st.slider("N2__2_pcnt", 0.0, 100.0, float(st.session_state.sim_vals["N2__2_pcnt"]), help="N2 % engine 2.", key="sim_N2_2")
+            egt2 = st.slider("EGT_2__deg", 0.0, 1200.0, float(st.session_state.sim_vals["EGT_2__deg"]), help="Exhaust Gas Temp engine 2 (°C).", key="sim_EGT_2")
+            oilt2 = st.slider("OILT2__deg", -40.0, 200.0, float(st.session_state.sim_vals["OILT2__deg"]), help="Oil temp engine 2 (°C).", key="sim_OILT2")
+            fuep2 = st.slider("FUEP2__psi", 0.0, 100.0, float(st.session_state.sim_vals["FUEP2__psi"]), help="Fuel press engine 2 (psi).", key="sim_FUEP2")
+
+        b1_amp = st.number_input("batt1__amp", value=float(st.session_state.sim_vals["batt1__amp"]), step=1.0, help="Battery 1 current (A)", key="sim_batt1_amp")
+        b2_amp = st.number_input("batt2__amp", value=float(st.session_state.sim_vals["batt2__amp"]), step=1.0, help="Battery 2 current (A)", key="sim_batt2_amp")
+        b1_volt = st.number_input("batt1_volt", value=float(st.session_state.sim_vals["batt1_volt"]), step=0.1, help="Battery 1 voltage", key="sim_batt1_volt")
+        b2_volt = st.number_input("batt2_volt", value=float(st.session_state.sim_vals["batt2_volt"]), step=0.1, help="Battery 2 voltage", key="sim_batt2_volt")
+
+        if st.button("🔄 Reset Simulator", key="sim_reset"):
+            st.session_state.sim_vals = feature_defaults.copy()
+            st.session_state.sim_seq = []
+            st.session_state["last_sim_prob"] = 0.0
+            st.experimental_rerun()
+
+        st.session_state.sim_vals.update({
+            "power_1hp": p1, "power_2hp": p2,
+            "thrst_1lb": thr1, "thrst_2lb": thr2,
+            "rpm_1engin": rpm1, "rpm_2engin": rpm2,
+            "N1__1_pcnt": n1_1, "N1__2_pcnt": n1_2,
+            "N2__1_pcnt": n2_1, "N2__2_pcnt": n2_2,
+            "EGT_1__deg": egt1, "EGT_2__deg": egt2,
+            "OILT1__deg": oilt1, "OILT2__deg": oilt2,
+            "FUEP1__psi": fuep1, "FUEP2__psi": fuep2,
+            "batt1__amp": b1_amp, "batt2__amp": b2_amp,
+            "batt1_volt": b1_volt, "batt2_volt": b2_volt
+        })
+
+        if auto_map:
+            s = 0.5 + 0.55 * (throttle / 100.0)
+            st.session_state.sim_vals["power_1hp"] = max(0.0, st.session_state.sim_vals["power_1hp"] * s)
+            st.session_state.sim_vals["power_2hp"] = max(0.0, st.session_state.sim_vals["power_2hp"] * s)
+            st.session_state.sim_vals["thrst_1lb"] = max(0.0, st.session_state.sim_vals["thrst_1lb"] * s)
+            st.session_state.sim_vals["thrst_2lb"] = max(0.0, st.session_state.sim_vals["thrst_2lb"] * s)
+            st.session_state.sim_vals["rpm_1engin"] = max(0.0, st.session_state.sim_vals["rpm_1engin"] * (0.8 + 0.4*(throttle/100.0)))
+            st.session_state.sim_vals["rpm_2engin"] = max(0.0, st.session_state.sim_vals["rpm_2engin"] * (0.8 + 0.4*(throttle/100.0)))
+
+        if f_overheat:
+            st.session_state.sim_vals["EGT_1__deg"] += 150.0
+            st.session_state.sim_vals["EGT_2__deg"] += 150.0
+            st.session_state.sim_vals["OILT1__deg"] += 20.0
+            st.session_state.sim_vals["OILT2__deg"] += 20.0
+        if f_fuel_restrict:
+            st.session_state.sim_vals["FUEP1__psi"] *= 0.5
+            st.session_state.sim_vals["FUEP2__psi"] *= 0.5
+            st.session_state.sim_vals["power_1hp"] *= 0.7
+            st.session_state.sim_vals["power_2hp"] *= 0.7
+        if f_elec_pump:
+            st.session_state.sim_vals["FUEP1__psi"] *= 0.3
+            st.session_state.sim_vals["FUEP2__psi"] *= 0.3
+
+        sim_feature_order = [
+            "power_1hp","power_2hp","thrst_1lb","thrst_2lb",
+            "rpm_1engin","rpm_2engin","N1__1_pcnt","N1__2_pcnt",
+            "N2__1_pcnt","N2__2_pcnt","EGT_1__deg","EGT_2__deg",
+            "OILT1__deg","OILT2__deg","FUEP1__psi","FUEP2__psi",
+            "batt1__amp","batt2__amp","batt1_volt","batt2_volt"
+        ]
+        sim_row = {k: float(st.session_state.sim_vals.get(k, 0.0)) for k in sim_feature_order}
+
+        # ----- XGBoost inference (robust)
+        try:
+            sim_df = pd.DataFrame([sim_row])
+            try:
+                feat_names = list(xgb_model.feature_names_in_)
+                sim_df = sim_df.reindex(columns=feat_names, fill_value=0.0)
+            except Exception:
+                pass
+            if xgb_model is not None:
+                if hasattr(xgb_model, "predict_proba"):
+                    xgb_prob = float(xgb_model.predict_proba(sim_df)[0][1])
+                else:
+                    # fallback to predict if no predict_proba
+                    pred = xgb_model.predict(sim_df)
+                    xgb_prob = float(pred[0]) if len(pred.shape)==1 else float(pred[0][0])
+            else:
+                xgb_prob = 0.0
+        except Exception:
+            xgb_prob = 0.0
+
+        # ----- LSTM inference (robust)
+        try:
+            if scaler is not None:
+                expected = getattr(scaler, "feature_names_in_", None)
+                if expected is not None:
+                    arr = np.array([sim_row.get(c, 0.0) for c in expected], dtype=float).reshape(1, -1)
+                else:
+                    arr = np.array([sim_row[c] for c in sim_feature_order], dtype=float).reshape(1, -1)
+                arr_scaled = scaler.transform(arr).reshape(-1)
+            else:
+                arr_scaled = np.array([sim_row[c] for c in sim_feature_order], dtype=float).reshape(-1)
+
+            # maintain sim_seq buffer
+            if "sim_seq" not in st.session_state:
+                st.session_state.sim_seq = []
+            st.session_state.sim_seq.append(arr_scaled)
+            if len(st.session_state.sim_seq) > DEFAULT_LSTM_TIMESTEPS:
+                st.session_state.sim_seq = st.session_state.sim_seq[-DEFAULT_LSTM_TIMESTEPS:]
+
+            seq_len = len(st.session_state.sim_seq)
+            if seq_len < DEFAULT_LSTM_TIMESTEPS:
+                pad_count = DEFAULT_LSTM_TIMESTEPS - seq_len
+                pad = [st.session_state.sim_seq[0]] * pad_count if seq_len>0 else [arr_scaled]*pad_count
+                seq_arr = np.stack(pad + st.session_state.sim_seq, axis=0)
+            else:
+                seq_arr = np.stack(st.session_state.sim_seq[-DEFAULT_LSTM_TIMESTEPS:], axis=0)
+
+            lstm_input = seq_arr.reshape(1, seq_arr.shape[0], seq_arr.shape[1])
+            if lstm_model is not None:
+                lstm_prob = float(lstm_model.predict(lstm_input, verbose=0)[0][0])
+            else:
+                lstm_prob = 0.0
+        except Exception:
+            lstm_prob = 0.0
+
+        combined_prob = float((xgb_prob + lstm_prob))
+        last_sim_prob = st.session_state.get("last_sim_prob", combined_prob)
+        smooth_sim_prob = last_sim_prob + (combined_prob - last_sim_prob)
+        st.session_state["last_sim_prob"] = smooth_sim_prob
+
+        # immediate UI update for simulator
+        try:
+            render_gauge(smooth_sim_prob, green_threshold, yellow_threshold)
+        except Exception:
+            pass
+        try:
+            chart_xgb.add_rows(pd.DataFrame({"xgb_prob":[xgb_prob]}))
+        except Exception:
+            pass
+        try:
+            chart_lstm.add_rows(pd.DataFrame({"lstm_prob":[lstm_prob]}))
+        except Exception:
+            pass
+
+        try:
+            zone_txt, color, desc = zone_label(smooth_sim_prob, green_threshold, yellow_threshold)
+            status_area.markdown(f"""
+                <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,0.03);
+                    border-left:6px solid {color};box-shadow:0 0 18px {color}60;">
+                <h3 style="margin:0;color:{color};font-size:22px">{zone_txt} (Simulator)</h3>
+                <p style="margin:4px 0;font-size:14px;color:white">{desc}</p>
+                <p style="margin:4px 0;color:lightgray">
+                Combined Probability: <b style="color:{color}">{smooth_sim_prob:.3f}</b></p>
+                <hr style="border:1px solid rgba(255,255,255,0.06)">
+                <h4 style="color:white;margin-bottom:4px;">Simulator Telemetry</h4>
+                <ul style="list-style:none;padding-left:8px;color:#dcdcdc;font-size:14px;line-height:1.4;">
+                    <li><b>Throttle:</b> {throttle:.0f}%</li>
+                    <li><b>Power (1/2 hp):</b> {st.session_state.sim_vals['power_1hp']:.1f} / {st.session_state.sim_vals['power_2hp']:.1f}</li>
+                    <li><b>Thrust (1/2 lb):</b> {st.session_state.sim_vals['thrst_1lb']:.1f} / {st.session_state.sim_vals['thrst_2lb']:.1f}</li>
+                    <li><b>RPM (1/2):</b> {st.session_state.sim_vals['rpm_1engin']:.0f} / {st.session_state.sim_vals['rpm_2engin']:.0f}</li>
+                    <li><b>EGT (1/2 °C):</b> {st.session_state.sim_vals['EGT_1__deg']:.1f} / {st.session_state.sim_vals['EGT_2__deg']:.1f}</li>
+                    <li><b>Fuel Press (1/2 psi):</b> {st.session_state.sim_vals['FUEP1__psi']:.1f} / {st.session_state.sim_vals['FUEP2__psi']:.1f}</li>
+                </ul>
+                </div>
+            """, unsafe_allow_html=True)
+        except Exception:
+            pass
+
+        if st.session_state.get("log_enabled", False):
+            try:
+                st.session_state.live_log_df = pd.concat([st.session_state.live_log_df, pd.DataFrame([{
+                    "timestamp": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
+                    "xgb_prob": xgb_prob,
+                    "lstm_prob": lstm_prob,
+                    "combined_prob": smooth_sim_prob,
+                    "zone": zone_txt
+                }])], ignore_index=True)
+                st.session_state.live_log_df.tail(1).to_csv(LOG_OUT_PATH, mode="a", header=not os.path.exists(LOG_OUT_PATH), index=False)
+            except Exception:
+                pass
+
+    # ------------------------------
+    # REAL STREAM: start/stop handling (reading from CSV)
+    # ------------------------------
     if start_stream:
         st.session_state.stream_running = True
     if stop_stream:
         st.session_state.stream_running = False
 
-    # If simulator had precomputed a sim gauge value before layout, render it now
-    if "last_sim_prob" in st.session_state:
-        try:
-            render_gauge(st.session_state.get("last_sim_prob", 0.0), green_threshold, yellow_threshold)
-        except Exception:
-            pass
-
     if st.session_state.stream_running:
-        last_prob = 0.0
+        last_prob = st.session_state.get("last_prob", 0.0)
         for row in live_stream():
             if not st.session_state.stream_running:
                 break
@@ -516,13 +512,11 @@ if mode == "📡 Real-Time Streaming":
             combined = (xgb_prob + lstm_prob)
             smooth = last_prob + (combined - last_prob)
             last_prob = smooth
+            st.session_state["last_prob"] = last_prob
 
             render_gauge(smooth, green_threshold, yellow_threshold)
-            try:
-                chart_xgb.add_rows(pd.DataFrame({"xgb_prob":[xgb_prob]}))
-                chart_lstm.add_rows(pd.DataFrame({"lstm_prob":[lstm_prob]}))
-            except Exception:
-                pass
+            chart_xgb.add_rows(pd.DataFrame({"xgb_prob":[xgb_prob]}))
+            chart_lstm.add_rows(pd.DataFrame({"lstm_prob":[lstm_prob]}))
 
             zone_txt, color, desc = zone_label(smooth, green_threshold, yellow_threshold)
             try:
@@ -559,74 +553,20 @@ if mode == "📡 Real-Time Streaming":
             """, unsafe_allow_html=True)
 
             if st.session_state.get("log_enabled", False):
-                st.session_state.live_log_df = pd.concat([st.session_state.live_log_df, pd.DataFrame([{
-                    "timestamp": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
-                    "xgb_prob": xgb_prob,
-                    "lstm_prob": lstm_prob,
-                    "combined_prob": smooth,
-                    "zone": zone_txt
-                }])], ignore_index=True)
-                st.session_state.live_log_df.tail(1).to_csv(LOG_OUT_PATH, mode="a", header=not os.path.exists(LOG_OUT_PATH), index=False)
+                try:
+                    st.session_state.live_log_df = pd.concat([st.session_state.live_log_df, pd.DataFrame([{
+                        "timestamp": datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
+                        "xgb_prob": xgb_prob,
+                        "lstm_prob": lstm_prob,
+                        "combined_prob": smooth,
+                        "zone": zone_txt
+                    }])], ignore_index=True)
+                    st.session_state.live_log_df.tail(1).to_csv(LOG_OUT_PATH, mode="a", header=not os.path.exists(LOG_OUT_PATH), index=False)
+                except Exception:
+                    pass
+
             time.sleep(refresh_rate)
         st.info("Stream stopped.")
-
-    # Additionally: render simulator's last value into charts/gauge/status (if simulator was used even when stream not running)
-    if not st.session_state.stream_running and "last_sim_prob" in st.session_state:
-        try:
-            # Use last_sim_prob to render gauge & status
-            render_gauge(st.session_state.get("last_sim_prob", 0.0), green_threshold, yellow_threshold)
-            # add last simulator xgb/lstm values if available
-            try:
-                if "sim_seq" in st.session_state and len(st.session_state.sim_seq) > 0:
-                    # retrieve sim probabilities from session state if previously computed
-                    # they were not stored globally; we re-run inference here to ensure charts show simulator output
-                    sim_vals = st.session_state.get("sim_vals", {})
-                    sim_feature_order_local = [
-                        "power_1hp","power_2hp","thrst_1lb","thrst_2lb",
-                        "rpm_1engin","rpm_2engin","N1__1_pcnt","N1__2_pcnt",
-                        "N2__1_pcnt","N2__2_pcnt","EGT_1__deg","EGT_2__deg",
-                        "OILT1__deg","OILT2__deg","FUEP1__psi","FUEP2__psi",
-                        "batt1__amp","batt2__amp","batt1_volt","batt2_volt"
-                    ]
-                    sim_row_local = {k: float(sim_vals.get(k, 0.0)) for k in sim_feature_order_local}
-                    try:
-                        sim_df_local = pd.DataFrame([sim_row_local])
-                        try:
-                            feat_names = list(xgb_model.feature_names_in_)
-                            sim_df_local = sim_df_local.reindex(columns=feat_names, fill_value=0.0)
-                        except Exception:
-                            pass
-                        xgb_prob_local = float(xgb_model.predict_proba(sim_df_local.values)[0][1]) if xgb_model is not None else 0.0
-                    except Exception:
-                        xgb_prob_local = 0.0
-                    # LSTM compute quickly
-                    try:
-                        if scaler is not None:
-                            expected = getattr(scaler, "feature_names_in_", None)
-                            if expected is not None:
-                                arr = np.array([sim_row_local.get(c, 0.0) for c in expected], dtype=float).reshape(1, -1)
-                            else:
-                                arr = np.array([sim_row_local[c] for c in sim_feature_order_local], dtype=float).reshape(1, -1)
-                            arr_scaled = scaler.transform(arr).reshape(-1)
-                        else:
-                            arr_scaled = np.array([sim_row_local[c] for c in sim_feature_order_local], dtype=float).reshape(-1)
-                        # append to temp seq and create sequence
-                        tmp_seq = st.session_state.get("sim_seq", [])
-                        tmp_seq_local = tmp_seq[-DEFAULT_LSTM_TIMESTEPS:] if len(tmp_seq)>0 else [arr_scaled]*(DEFAULT_LSTM_TIMESTEPS)
-                        seq_arr_local = np.stack(tmp_seq_local[-DEFAULT_LSTM_TIMESTEPS:], axis=0)
-                        lstm_input_local = seq_arr_local.reshape(1, seq_arr_local.shape[0], seq_arr_local.shape[1])
-                        lstm_prob_local = float(lstm_model.predict(lstm_input_local, verbose=0)[0][0]) if lstm_model is not None else 0.0
-                    except Exception:
-                        lstm_prob_local = 0.0
-                    try:
-                        chart_xgb.add_rows(pd.DataFrame({"xgb_prob":[xgb_prob_local]}))
-                        chart_lstm.add_rows(pd.DataFrame({"lstm_prob":[lstm_prob_local]}))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        except Exception:
-            pass
 
 # ---------- BATCH ANALYSIS ----------
 if mode == "📊 Interactive Batch Analysis":
@@ -641,7 +581,7 @@ if mode == "📊 Interactive Batch Analysis":
             st.subheader("XGBoost Analysis")
             X = clean_features_for_model(df)
             y = df["failure"] if "failure" in df.columns else None
-            proba = xgb_model.predict_proba(X)[:,1]
+            proba = xgb_model.predict_proba(X)[:,1] if xgb_model is not None and hasattr(xgb_model, "predict_proba") else np.zeros(X.shape[0])
             preds = (proba>=0.5).astype(int)
             if y is not None:
                 cm = confusion_matrix(y, preds)
@@ -655,20 +595,17 @@ if mode == "📊 Interactive Batch Analysis":
             y = df["failure"] if "failure" in df.columns else None
             expected_features = getattr(scaler, "feature_names_in_", None)
             if expected_features is not None:
-                # Add missing columns
                 for col in expected_features:
                     if col not in df_num.columns:
                         df_num[col] = 0.0
-                # Drop extra columns not seen during training
                 df_num = df_num[expected_features]
             else:
-                # fallback: ensure consistent number of columns
-                df_num = df_num.iloc[:, :scaler.mean_.shape[0]]
-            X_scaled = scaler.transform(df_num)
+                df_num = df_num.iloc[:, :scaler.mean_.shape[0]] if scaler is not None else df_num
+            X_scaled = scaler.transform(df_num) if scaler is not None else df_num.values
             X_seq = sliding_windows(X_scaled, DEFAULT_LSTM_TIMESTEPS)
-            proba = lstm_model.predict(X_seq).ravel()
-            preds = (proba>=0.5).astype(int)
-            if y is not None:
+            proba = lstm_model.predict(X_seq).ravel() if lstm_model is not None and X_seq.shape[0] > 0 else np.array([])
+            preds = (proba>=0.5).astype(int) if proba.size>0 else np.array([])
+            if y is not None and proba.size>0:
                 y_true = y[DEFAULT_LSTM_TIMESTEPS:DEFAULT_LSTM_TIMESTEPS+len(preds)]
                 cm = confusion_matrix(y_true, preds)
                 st.pyplot(plot_confusion(cm,["NoFail","Fail"],"LSTM Confusion"))
