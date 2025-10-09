@@ -1,0 +1,85 @@
+pipeline {
+    agent any
+
+    environment {
+        PYTHONIOENCODING = "utf-8"
+        PROJECT_DIR = "C:/Users/T8630/Desktop/xplane_predictive_project"
+        VENV_DIR = "${PROJECT_DIR}/venv"
+        PYTHON = "${VENV_DIR}/Scripts/python.exe"
+        STREAMLIT_PORT = "8501"
+    }
+
+    stages {
+
+        stage('Setup Virtual Environment') {
+            steps {
+                echo "Creating virtual environment..."
+                bat """
+                if not exist "%VENV_DIR%" (
+                    python -m venv "%VENV_DIR%"
+                )
+                """
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                echo "Installing required Python packages in virtual environment..."
+                bat """
+                "%PYTHON%" -m pip install --upgrade pip
+                "%PYTHON%" -m pip install -r "%PROJECT_DIR%/requirements.txt"
+                """
+            }
+        }
+
+        stage('Validate Models') {
+            steps {
+                echo "Validating model files (XGBoost + LSTM)..."
+                bat """
+                "%PYTHON%" -X utf8 -c "import joblib, tensorflow as tf, os; \
+xgb=r'%PROJECT_DIR%/models/xplane_xgboost.pkl'; \
+lstm=r'%PROJECT_DIR%/models/xplane_lstm.h5'; \
+assert os.path.exists(xgb), 'Missing XGBoost model!'; \
+assert os.path.exists(lstm), 'Missing LSTM model!'; \
+joblib.load(xgb); tf.keras.models.load_model(lstm); \
+print('✅ Models validated successfully.')"
+                """
+            }
+        }
+
+        stage('Launch Streamlit Dashboard') {
+            steps {
+                echo "🚀 Launching Streamlit dashboard automatically..."
+                bat """
+                echo Killing any previous Streamlit processes...
+                taskkill /F /IM streamlit.exe /T  >nul 2>&1
+
+                echo Starting Streamlit in background...
+                start /B "%PYTHON%" -m streamlit run "%PROJECT_DIR%/src/live_app.py" --server.port=%STREAMLIT_PORT% --server.headless true
+
+                echo Waiting for Streamlit to initialize...
+                ping -n 10 127.0.0.1 >nul
+
+                echo ✅ Streamlit should now be running at http://localhost:%STREAMLIT_PORT%
+                start "" "http://localhost:%STREAMLIT_PORT%"
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ Deployment successful! Access your dashboard at http://localhost:%STREAMLIT_PORT%"
+
+            // Optional cleanup: stop Streamlit after the build finishes
+            bat """
+            echo Cleaning up Streamlit processes...
+            taskkill /F /IM streamlit.exe /T  >nul 2>&1
+            """
+        }
+        failure {
+            echo "❌ Build failed. Check Jenkins console for logs."
+            bat "taskkill /F /IM streamlit.exe /T  >nul 2>&1"
+        }
+    }
+}
