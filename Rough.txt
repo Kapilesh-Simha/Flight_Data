@@ -1,38 +1,145 @@
-# =====================================
-# 📈 FIXED DYNAMIC CHART UPDATE (Telemetry Simulator)
-# =====================================
-
-# Create persistent chart placeholders once
-if "sim_chart_xgb_ph" not in st.session_state:
-    st.session_state.sim_chart_xgb_ph = st.empty()
-if "sim_chart_lstm_ph" not in st.session_state:
-    st.session_state.sim_chart_lstm_ph = st.empty()
-
-# Initialize stored data lists
-if "sim_chart_xgb_data" not in st.session_state:
-    st.session_state.sim_chart_xgb_data = []
-if "sim_chart_lstm_data" not in st.session_state:
-    st.session_state.sim_chart_lstm_data = []
-
-# Append new probabilities
-st.session_state.sim_chart_xgb_data.append(xgb_prob)
-st.session_state.sim_chart_lstm_data.append(lstm_prob)
-
-# Keep the last 50 points
-st.session_state.sim_chart_xgb_data = st.session_state.sim_chart_xgb_data[-50:]
-st.session_state.sim_chart_lstm_data = st.session_state.sim_chart_lstm_data[-50:]
-
-# Convert to DataFrames
-df_xgb = pd.DataFrame(
-    {"XGBoost Failure Probability": st.session_state.sim_chart_xgb_data}
-)
-df_lstm = pd.DataFrame(
-    {"LSTM Failure Probability": st.session_state.sim_chart_lstm_data}
+# ---------- MODE SELECTION ----------
+st.sidebar.header("Mode Selection")
+mode = st.sidebar.radio(
+    "Choose mode",
+    ["📡 Real-Time Streaming", "📊 Interactive Batch Analysis", "🕹️ Telemetry Simulator"]
 )
 
-# Draw charts properly (using placeholders, not persistent charts)
-col_xgb, col_lstm = st.columns(2)
-with col_xgb:
-    st.session_state.sim_chart_xgb_ph.line_chart(df_xgb)
-with col_lstm:
-    st.session_state.sim_chart_lstm_ph.line_chart(df_lstm)
+# Load models/scaler
+xgb_model, saved_threshold = load_xgb_model()
+lstm_model = load_lstm_model()
+scaler = load_scaler()
+
+# ==========================================================
+# 📡 REAL-TIME STREAMING MODE
+# ==========================================================
+if mode == "📡 Real-Time Streaming":
+    # (⚙️ KEEP your entire existing Real-Time Streaming code here unchanged)
+    pass  # placeholder for your existing block
+
+# ==========================================================
+# 📊 INTERACTIVE BATCH ANALYSIS MODE
+# ==========================================================
+elif mode == "📊 Interactive Batch Analysis":
+    # (⚙️ KEEP your existing batch analysis section here)
+    pass
+
+# ==========================================================
+# 🕹️ TELEMETRY SIMULATOR MODE
+# ==========================================================
+elif mode == "🕹️ Telemetry Simulator":
+    st.title("🕹️ Telemetry Simulator (Interactive Mode)")
+    st.markdown("""
+    Use the sliders below to simulate live engine conditions.  
+    Predictions are made in real-time using **both XGBoost and LSTM models**, just like the live stream.
+    """)
+
+    # Reuse existing placeholders (so gauge + charts work)
+    st.session_state.setdefault("placeholders", {})
+    ph = st.session_state["placeholders"]
+    ph["gauge_ph"] = st.empty()
+    ph["chart_xgb"] = st.line_chart(pd.DataFrame(columns=["xgb_prob"]))
+    ph["chart_lstm"] = st.line_chart(pd.DataFrame(columns=["lstm_prob"]))
+    ph["status_area"] = st.empty()
+
+    # Sidebar thresholds
+    st.sidebar.subheader("🎯 Risk Zone Thresholds")
+    green_threshold = st.sidebar.slider("🟢 Green Zone", 0.0, 1.0, 0.5, 0.01)
+    yellow_threshold = st.sidebar.slider("🟡 Yellow Zone", green_threshold, 1.0, 0.75, 0.01)
+
+    # --- Sim Controls
+    throttle = st.slider("Throttle Level (%)", 0, 100, 50)
+    auto_map = st.checkbox("Auto-map throttle → power/thrust/RPM", True)
+    st.markdown("#### 🧨 Failure Conditions")
+    f_overheat = st.checkbox("Engine Overheat")
+    f_fuel_restrict = st.checkbox("Fuel Restriction")
+    f_elec_pump = st.checkbox("Electronic Fuel Pump Failure")
+
+    # --- Feature Inputs
+    st.markdown("---")
+    st.subheader("✈️ Engine & System Telemetry")
+
+    # Divide input columns for compactness
+    col1, col2 = st.columns(2)
+
+    # Example core features — reuse your existing slider definitions:
+    with col1:
+        p1 = st.number_input("power_1hp", 0.0, p1_max, 0.0)
+        t1 = st.number_input("thrst_1lb", 0.0, t1_max, 0.0)
+        rpm1 = st.number_input("rpm_1engin", 0.0, r1_max, 0.0)
+        egt1 = st.number_input("EGT_1__deg", 0.0, e1_max, 0.0)
+        oilt1 = st.number_input("OILT1__deg", -40.0, ot1_max, 0.0)
+        fp1 = st.number_input("FUEP1__psi", 0.0, fp1_max, 0.0)
+    with col2:
+        p2 = st.number_input("power_2hp", 0.0, p2_max, 0.0)
+        t2 = st.number_input("thrst_2lb", 0.0, t2_max, 0.0)
+        rpm2 = st.number_input("rpm_2engin", 0.0, r2_max, 0.0)
+        egt2 = st.number_input("EGT_2__deg", 0.0, e2_max, 0.0)
+        oilt2 = st.number_input("OILT2__deg", -40.0, ot2_max, 0.0)
+        fp2 = st.number_input("FUEP2__psi", 0.0, fp2_max, 0.0)
+
+    # Reset button
+    if st.button("🔄 Reset All Values"):
+        st.session_state.clear()
+        st.rerun()
+
+    # --- Build simulator data row
+    sim_row = {
+        "power_1hp": p1, "power_2hp": p2,
+        "thrst_1lb": t1, "thrst_2lb": t2,
+        "rpm_1engin": rpm1, "rpm_2engin": rpm2,
+        "EGT_1__deg": egt1, "EGT_2__deg": egt2,
+        "OILT1__deg": oilt1, "OILT2__deg": oilt2,
+        "FUEP1__psi": fp1, "FUEP2__psi": fp2
+    }
+
+    # --- Apply failures
+    if f_overheat:
+        sim_row["EGT_1__deg"] += 150
+        sim_row["EGT_2__deg"] += 150
+    if f_fuel_restrict:
+        sim_row["FUEP1__psi"] *= 0.5
+        sim_row["FUEP2__psi"] *= 0.5
+    if f_elec_pump:
+        sim_row["FUEP1__psi"] *= 0.3
+        sim_row["FUEP2__psi"] *= 0.3
+
+    # --- Predict (same as live streaming)
+    sim_df = pd.DataFrame([sim_row])
+    try:
+        feat_names = list(xgb_model.feature_names_in_)
+        sim_df = sim_df.reindex(columns=feat_names, fill_value=0.0)
+    except Exception:
+        pass
+
+    xgb_prob = float(xgb_model.predict_proba(sim_df)[0][1]) if xgb_model else 0.0
+
+    # LSTM processing
+    arr = np.array(list(sim_row.values()), dtype=float).reshape(1, -1)
+    if scaler is not None:
+        arr = scaler.transform(arr)
+    if "sim_seq" not in st.session_state:
+        st.session_state["sim_seq"] = []
+    st.session_state["sim_seq"].append(arr.flatten())
+    if len(st.session_state["sim_seq"]) > DEFAULT_LSTM_TIMESTEPS:
+        st.session_state["sim_seq"] = st.session_state["sim_seq"][-DEFAULT_LSTM_TIMESTEPS:]
+    seq = np.array(st.session_state["sim_seq"]).reshape(1, len(st.session_state["sim_seq"]), -1)
+    lstm_prob = float(lstm_model.predict(seq, verbose=0)[0][0]) if lstm_model else 0.0
+
+    combined_prob = (xgb_prob + lstm_prob) / 2.0
+
+    # --- Update visuals
+    render_gauge(combined_prob, green_threshold, yellow_threshold)
+    ph["chart_xgb"].add_rows(pd.DataFrame({"xgb_prob": [xgb_prob]}))
+    ph["chart_lstm"].add_rows(pd.DataFrame({"lstm_prob": [lstm_prob]}))
+
+    zone_txt, color, desc = zone_label(combined_prob, green_threshold, yellow_threshold)
+    ph["status_area"].markdown(f"""
+        <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,0.03);
+            border-left:6px solid {color};box-shadow:0 0 18px {color}60;">
+        <h3 style="margin:0;color:{color};font-size:22px">{zone_txt} (Simulator)</h3>
+        <p style="margin:4px 0;font-size:14px;color:white">{desc}</p>
+        <p style="margin:4px 0;color:lightgray">
+        Combined Probability: <b style="color:{color}">{combined_prob:.3f}</b></p>
+        </div>
+    """, unsafe_allow_html=True)
