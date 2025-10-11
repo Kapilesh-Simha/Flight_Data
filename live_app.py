@@ -165,6 +165,11 @@ with st.sidebar.expander("📘 About This Dashboard"):
     - 🟢 0.00 – 0.50 → Stable (Engine healthy)
     - 🟡 0.51 – 0.70 → Low Risk (Potential warning signs)
     - 🔴 0.71 – 1.00 → High Risk (Immediate inspection advised)
+    - **Note:** Thresholds can be adjusted based on operational preferences.
+
+    #### 🕹️ Telemetry Simulation (for common people) --NEW--:
+    - Adjust key engine parameters (throttle, RPM, EGT, oil temp/pressure) to see real-time impact on failure probability.
+    - Option to sync 2nd engine parameters with the 1st for simplified testing.
 
     #### 💡 Powered by:
     - **XGBoost** (for static feature-based health scoring)
@@ -590,6 +595,7 @@ elif mode == "🎮 What-If Simulation":
     with st.sidebar:
         st.title("🎯 Failure Probability")
         render_gauge(combined_sim, sim_g_threshold, sim_y_threshold)
+        st.title(combined_sim)
 
     # --- Metrics ---
     st.metric("XGBoost Prob", f"{xgb_prob:.3f}")
