@@ -35,6 +35,8 @@ ot1_max = df["OILT1__deg"].max()
 ot2_max = df["OILT2__deg"].max()
 fp1_max = df["FUEP1__psi"].max()
 fp2_max = df["FUEP2__psi"].max()
+
+
 # ---------- APP CONFIG ----------
 st.set_page_config(page_title="✈️ X-Plane Predictive Maintenance", layout="wide")
 
@@ -312,8 +314,7 @@ if mode == "📡 Real-Time Streaming":
             except Exception:
                 lstm_prob = 0.0
 
-            # combine and normalize to [0,1] by averaging (keeps consistent scale)
-            combined = (xgb_prob + lstm_prob) / 2.0
+            combined = xgb_prob + lstm_prob
             smooth = last_prob + (combined - last_prob)
             last_prob = smooth
 
@@ -334,7 +335,7 @@ if mode == "📡 Real-Time Streaming":
             except Exception:
                 engine_rpm = n1 = n2 = oil_temp1 = oil_temp2 = egt1 = egt2 = fuel_pressure = 0.0
             status_area.markdown(f"""
-                <div style="padding:12px;border-radius:12px;background:rgba(255,255,255,0.05);
+                <div style="padding:13px;border-radius:12px;background:rgba(255,255,255,0.05);
                     border-left:6px solid {color};box-shadow:0 0 25px {color}80;">
                 <h3 style="margin:0;color:{color};font-size:22px">{zone_txt}</h3>
                 <p style="margin:4px 0;font-size:16px;color:white">{desc}</p>
@@ -357,7 +358,7 @@ if mode == "📡 Real-Time Streaming":
 
             if st.session_state.get("log_enabled", False):
                 st.session_state.live_log_df = pd.concat([st.session_state.live_log_df, pd.DataFrame([{
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now().isoformat(),
                     "xgb_prob": xgb_prob,
                     "lstm_prob": lstm_prob,
                     "combined_prob": smooth,
@@ -583,7 +584,7 @@ elif mode == "🎮 What-If Simulation":
     except Exception:
         lstm_prob = 0.0
 
-    combined_sim = (xgb_prob + lstm_prob)
+    combined_sim = xgb_prob + lstm_prob
 
     # --- Sidebar gauge ---
     with st.sidebar:
