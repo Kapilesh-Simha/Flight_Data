@@ -22,7 +22,19 @@ SCALER_PATH = r"C:\Users\kapil\OneDrive\Desktop\xplane_predictive_project\models
 DATA_PATH = r"C:\Users\kapil\OneDrive\Desktop\xplane_predictive_project\data\processed\xplane_features.csv"
 DEFAULT_LSTM_TIMESTEPS = 50
 LOG_OUT_PATH = r"C:\Users\kapil\OneDrive\Desktop\xplane_predictive_project\data\live_log.csv"
-
+df = pd.read_csv(DATA_PATH)
+p1_max = df["power_1hp"].max()
+p2_max = df["power_2hp"].max()
+t1_max = df["thrst_1lb"].max()
+t2_max = df["thrst_2lb"].max()
+r1_max = df["rpm_1engin"].max()
+r2_max = df["rpm_2engin"].max()
+e1_max = df["EGT_1__deg"].max()
+e2_max = df["EGT_2__deg"].max()
+ot1_max = df["OILT1__deg"].max()
+ot2_max = df["OILT2__deg"].max()
+fp1_max = df["FUEP1__psi"].max()
+fp2_max = df["FUEP2__psi"].max()
 # ---------- APP CONFIG ----------
 st.set_page_config(page_title="✈️ X-Plane Predictive Maintenance", layout="wide")
 
@@ -72,6 +84,8 @@ def clean_features_for_model(row_df, drop_cols=("failure",)):
     return df.select_dtypes(include=[np.number])
 
 def sliding_windows(X, timesteps=50):
+    if X is None or len(X) == 0:
+        return np.empty((0, timesteps, 0))
     Xs = [X[i:i+timesteps] for i in range(len(X)-timesteps)]
     return np.stack(Xs, axis=0) if Xs else np.empty((0, timesteps, X.shape[1]))
 
@@ -104,7 +118,11 @@ def plot_roc(y_true, y_proba, label="Model"):
     plt.tight_layout()
     return fig, roc_auc
 
-def identify_top_contributors(xgb_model, scaler, features_df, top_k=3):
+def identify_top_contributors(xgb_model, scaler, features_df_or_dict, top_k=3):
+    """
+    features_df_or_dict can be a single-row DataFrame or a dict mapping feature->value.
+    Returns list of top contributors or None.
+    """
     if xgb_model is None or scaler is None:
         return None
     try:
@@ -117,7 +135,12 @@ def identify_top_contributors(xgb_model, scaler, features_df, top_k=3):
     mean, scale = getattr(scaler, "mean_", None), getattr(scaler, "scale_", None)
     if mean is None or scale is None:
         return None
-    row_vals = np.array([float(features_df.get(col, 0)) for col in feat_names])
+    # build row_vals
+    if isinstance(features_df_or_dict, pd.DataFrame):
+        row_map = features_df_or_dict.iloc[0].to_dict()
+    else:
+        row_map = dict(features_df_or_dict)
+    row_vals = np.array([float(row_map.get(col, 0)) for col in feat_names])
     z = (row_vals - mean) / np.where(scale==0, 1e-6, scale)
     scores = np.abs(z) * np.abs(importances)
     top_idx = np.argsort(scores)[::-1][:top_k]
@@ -149,11 +172,82 @@ with st.sidebar.expander("📘 About This Dashboard"):
     """)
 
 st.sidebar.header("Mode Selection")
-mode = st.sidebar.radio("Choose mode", ["📡 Real-Time Streaming", "📊 Interactive Batch Analysis"])
+# Added new simulation mode item to the list
+mode = st.sidebar.radio("Choose mode", ["📡 Real-Time Streaming", "📊 Interactive Batch Analysis", "🎮 What-If Simulation"])
 
 xgb_model, saved_threshold = load_xgb_model()
 lstm_model = load_lstm_model()
 scaler = load_scaler()
+
+# Create a reusable placeholder for the gauge
+gauge_ph = st.empty()
+
+def render_gauge(prob, g_thresh, y_thresh):
+    """Animated cinematic gauge with glowing background that reacts to failure probability."""
+    prob = float(np.clip(prob, 0.0, 1.0))
+
+    # Determine zone colors + glow intensity
+    if prob <= g_thresh:
+        bar_color = "#15FF00"       # bright green
+        bg_color = "rgba(0, 200, 0, 0.5)"  # subtle green
+        pulse_strength = 0.1
+    elif prob <= y_thresh:
+        bar_color = "#FFD700"       # amber
+        bg_color = "rgba(255, 215, 0, 0.25)"
+        pulse_strength = 0.3
+    else:
+        bar_color = "#FF4C4C"       # bright red
+        bg_color = "rgba(255, 0, 0, 0.3)"
+        pulse_strength = 0.6
+
+    pulse_phase = (time.time() * 2.5) % (2 * np.pi) 
+    pulse_alpha = 0.25 + pulse_strength * (0.5 + 0.5 * np.sin(pulse_phase)) 
+    glow_rgba = f"rgba(255, 0, 0, {pulse_alpha:.2f})" if prob > y_thresh else bg_color
+
+    # Build the gauge
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=prob,
+        number={'font': {'color': 'white', 'size': 44}},
+        domain={'x': [0, 1], 'y': [0, 1]},
+        title={'text': "Failure Probability", 'font': {'size': 22, 'color': 'white'}},
+        gauge={
+            'axis': {'range': [0, 1], 'tickcolor': 'white', 'tickfont': {'color': 'white'}},
+            'bar': {'color': bar_color, 'thickness': 0.35},
+            'borderwidth': 3,
+            'bordercolor': "#000000",
+            'steps': [
+                {'range': [0, g_thresh], 'color': '#003300'},
+                {'range': [g_thresh, y_thresh], 'color': '#705900'},
+                {'range': [y_thresh, 1.0], 'color': '#4D0000'}
+            ],
+            'threshold': {
+                'line': {'color': "#000000", 'width': 5},
+                'thickness': 0.8,
+                'value': prob
+            }
+        }
+    ))
+
+    # Set layout with dynamic glow background
+    fig.update_layout(
+        height=360,
+        margin=dict(t=60, b=40, l=40, r=40),
+        paper_bgcolor=glow_rgba,
+        plot_bgcolor="#0E1117",
+        font={'color': 'white'},
+        transition={'duration': 500, 'easing': 'cubic-in-out'}
+    )
+
+    gauge_ph.plotly_chart(fig, use_container_width=True, key=f"gauge_{time.time_ns()}")
+
+def zone_label(prob, g_thresh, y_thresh):
+    if prob <= g_thresh:
+        return "🟢 STABLE","green","Engine is operating normally! 😊"
+    elif prob <= y_thresh:
+        return "🟡 LOW RISK","gold","Model has detected minor anomalies!"
+    else:
+        return "🔴 HIGH RISK","red","Potential failure detected! Consider replacing the part before failure!"
 
 # ---------- REAL-TIME STREAMING ----------
 if mode == "📡 Real-Time Streaming":
@@ -190,73 +284,6 @@ if mode == "📡 Real-Time Streaming":
     if "stream_running" not in st.session_state:
         st.session_state.stream_running = False
 
-    def render_gauge(prob, g_thresh, y_thresh):
-        """Animated cinematic gauge with glowing background that reacts to failure probability."""
-        prob = float(np.clip(prob, 0.0, 1.0))
-
-        # Determine zone colors + glow intensity
-        if prob <= g_thresh:
-            bar_color = "#15FF00"       # bright green
-            bg_color = "rgba(0, 200, 0, 0.5)"  # subtle green
-            pulse_strength = 0.1
-        elif prob <= y_thresh:
-            bar_color = "#FFD700"       # amber
-            bg_color = "rgba(255, 215, 0, 0.25)"
-            pulse_strength = 0.3
-        else:
-            bar_color = "#FF4C4C"       # bright red
-            bg_color = "rgba(255, 0, 0, 0.3)"
-            pulse_strength = 0.6
-
-        pulse_phase = (time.time() * 2.5) % (2 * np.pi) 
-        pulse_alpha = 0.25 + pulse_strength * (0.5 + 0.5 * np.sin(pulse_phase)) 
-        glow_rgba = f"rgba(255, 0, 0, {pulse_alpha:.2f})" if prob > y_thresh else bg_color
-
-        # Build the gauge
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=prob,
-            number={'font': {'color': 'white', 'size': 44}},
-            domain={'x': [0, 1], 'y': [0, 1]},
-            title={'text': "Failure Probability", 'font': {'size': 22, 'color': 'white'}},
-            gauge={
-                'axis': {'range': [0, 1], 'tickcolor': 'white', 'tickfont': {'color': 'white'}},
-                'bar': {'color': bar_color, 'thickness': 0.35},
-                'borderwidth': 3,
-                'bordercolor': "#000000",
-                'steps': [
-                    {'range': [0, g_thresh], 'color': '#003300'},
-                    {'range': [g_thresh, y_thresh], 'color': '#705900'},
-                    {'range': [y_thresh, 1.0], 'color': '#4D0000'}
-                ],
-                'threshold': {
-                    'line': {'color': "#000000", 'width': 5},
-                    'thickness': 0.8,
-                    'value': prob
-                }
-            }
-        ))
-
-        # Set layout with dynamic glow background
-        fig.update_layout(
-            height=360,
-            margin=dict(t=60, b=40, l=40, r=40),
-            paper_bgcolor=glow_rgba,     # 💡 soft pulsating background behind the meter
-            plot_bgcolor="#0E1117",      # consistent dashboard tone
-            font={'color': 'white'},
-            transition={'duration': 500, 'easing': 'cubic-in-out'}
-        )
-
-        gauge_ph.plotly_chart(fig, use_container_width=True, key=f"gauge_{time.time_ns()}")
-
-    def zone_label(prob, g_thresh, y_thresh):
-        if prob <= g_thresh:
-            return "🟢 STABLE","green","Engine is operating normally! 😊"
-        elif prob <= y_thresh:
-            return "🟡 LOW RISK","gold","Model has detected minor anomalies! "
-        else:
-            return "🔴 HIGH RISK","red","Potential failure detected! Consider replacing the part before failure! "
-
     if start_stream:
         st.session_state.stream_running = True
     if stop_stream:
@@ -269,19 +296,24 @@ if mode == "📡 Real-Time Streaming":
                 break
             features = clean_features_for_model(row)
             try:
-                xgb_prob = float(xgb_model.predict_proba(features)[0][1])
-            except Exception: xgb_prob = 0.0
+                xgb_prob = float(xgb_model.predict_proba(features)[0][1]) if xgb_model is not None else 0.0
+            except Exception:
+                xgb_prob = 0.0
             try:
-                scaled = scaler.transform(features)
+                scaled = scaler.transform(features) if scaler is not None else np.zeros_like(features)
                 if "seq_buf" not in st.session_state:
                     st.session_state.seq_buf = []
                 st.session_state.seq_buf.append(scaled.flatten())
-                lstm_prob = float(lstm_model.predict(
-                    np.array(st.session_state.seq_buf[-DEFAULT_LSTM_TIMESTEPS:]).reshape(1,DEFAULT_LSTM_TIMESTEPS,features.shape[1]),
-                    verbose=0)[0][0]) if len(st.session_state.seq_buf)>=DEFAULT_LSTM_TIMESTEPS else 0.0
-            except Exception: lstm_prob = 0.0
+                if len(st.session_state.seq_buf) >= DEFAULT_LSTM_TIMESTEPS and lstm_model is not None:
+                    arr = np.array(st.session_state.seq_buf[-DEFAULT_LSTM_TIMESTEPS:]).reshape(1,DEFAULT_LSTM_TIMESTEPS,features.shape[1])
+                    lstm_prob = float(lstm_model.predict(arr, verbose=0)[0][0])
+                else:
+                    lstm_prob = 0.0
+            except Exception:
+                lstm_prob = 0.0
 
-            combined = (xgb_prob + lstm_prob)
+            # combine and normalize to [0,1] by averaging (keeps consistent scale)
+            combined = (xgb_prob + lstm_prob) / 2.0
             smooth = last_prob + (combined - last_prob)
             last_prob = smooth
 
@@ -349,7 +381,10 @@ if mode == "📊 Interactive Batch Analysis":
             st.subheader("XGBoost Analysis")
             X = clean_features_for_model(df)
             y = df["failure"] if "failure" in df.columns else None
-            proba = xgb_model.predict_proba(X)[:,1]
+            try:
+                proba = xgb_model.predict_proba(X)[:,1] if xgb_model is not None else np.zeros(len(X))
+            except Exception:
+                proba = np.zeros(len(X))
             preds = (proba>=0.5).astype(int)
             if y is not None:
                 cm = confusion_matrix(y, preds)
@@ -361,7 +396,7 @@ if mode == "📊 Interactive Batch Analysis":
             st.subheader("LSTM Analysis")
             df_num = df.select_dtypes(include=[np.number])
             y = df["failure"] if "failure" in df.columns else None
-            expected_features = getattr(scaler, "feature_names_in_", None)
+            expected_features = getattr(scaler, "feature_names_in_", None) if scaler is not None else None
             if expected_features is not None:
                 # Add missing columns
                 for col in expected_features:
@@ -371,18 +406,194 @@ if mode == "📊 Interactive Batch Analysis":
                 df_num = df_num[expected_features]
             else:
                 # fallback: ensure consistent number of columns
-                df_num = df_num.iloc[:, :scaler.mean_.shape[0]]
-            X_scaled = scaler.transform(df_num)
+                if scaler is not None and getattr(scaler, "mean_", None) is not None:
+                    df_num = df_num.iloc[:, :scaler.mean_.shape[0]]
+            X_scaled = scaler.transform(df_num) if scaler is not None else df_num.values
             X_seq = sliding_windows(X_scaled, DEFAULT_LSTM_TIMESTEPS)
-            proba = lstm_model.predict(X_seq).ravel()
-            preds = (proba>=0.5).astype(int)
-            if y is not None:
+            try:
+                proba = lstm_model.predict(X_seq).ravel() if lstm_model is not None and X_seq.size else np.array([])
+            except Exception:
+                proba = np.array([])
+            preds = (proba>=0.5).astype(int) if len(proba) else np.array([])
+            if y is not None and len(proba):
                 y_true = y[DEFAULT_LSTM_TIMESTEPS:DEFAULT_LSTM_TIMESTEPS+len(preds)]
                 cm = confusion_matrix(y_true, preds)
                 st.pyplot(plot_confusion(cm,["NoFail","Fail"],"LSTM Confusion"))
                 fig_roc, aucv = plot_roc(y_true, proba, "LSTM")
                 st.pyplot(fig_roc)
                 st.success(f"ROC-AUC: {aucv:.3f}")
+
+# ---------- SIMULATION / WHAT-IF MODE ----------
+elif mode == "🎮 What-If Simulation":
+    st.title("🎮 What-If Simulation Mode — Play with key parameters")
+    st.markdown("Adjust the key engine and flight parameters below — background telemetry values remain constant.")
+
+    # --- Determine feature names (prefer scaler) ---
+    feature_names = getattr(scaler, "feature_names_in_", None)
+    if feature_names is None and os.path.exists(DATA_PATH):
+        try:
+            sample_df = pd.read_csv(DATA_PATH, nrows=100).select_dtypes(include=[np.number])
+            feature_names = list(sample_df.columns)
+        except Exception:
+            feature_names = []
+    if not feature_names:
+        feature_names = [
+            "power_1hp", "power_2hp", "thrst_1lb", "thrst_2lb",
+            "rpm_1engin", "rpm_2engin",
+            "N1__1_pcnt", "N1__2_pcnt", "N2__1_pcnt", "N2__2_pcnt",
+            "EGT_1__deg", "EGT_2__deg",
+            "OILT1__deg", "OILT2__deg",
+            "FUEP1__psi", "FUEP2__psi"
+        ]
+
+    # --- Constant features (auto-fixed) ---
+    constant_features = [
+        "fact_sec", "fsim_sec", "frame_time", "__cpu_time", "_gpu_time_",
+        "_grndratio", "_flitratio", "_Vind_kias", "_Vind_keas",
+        "Vtrue_ktas", "Vtrue_ktgs", "_Vind__mph", "Vtruemphas", "Vtruemphgs"
+    ]
+
+    # --- Sidebar controls ---
+    st.sidebar.markdown("### 🧭 Simulation Controls")
+    sim_g_threshold = st.sidebar.slider("🟢 Green Threshold", 0.0, 1.0, 0.5, 0.01)
+    sim_y_threshold = st.sidebar.slider("🟡 Yellow Threshold", sim_g_threshold, 1.0, 0.75, 0.01)
+    sim_randomize = st.sidebar.button("🔀 Randomize Values")
+    sim_reset = st.sidebar.button("♻️ Reset to Defaults")
+    sim_apply_noise = st.sidebar.checkbox("Auto-noise (oscillate values)", value=False)
+    sim_noise_amp = st.sidebar.slider("Noise amplitude", 0.0, 1.0, 0.05, 0.01)
+
+    # --- Prepare defaults and sample stats ---
+    sample_stats = {}
+    if os.path.exists(DATA_PATH):
+        try:
+            df_sample = pd.read_csv(DATA_PATH, nrows=500).select_dtypes(include=[np.number])
+            for fn in feature_names:
+                if fn in df_sample.columns:
+                    col = df_sample[fn].dropna()
+                    if not col.empty:
+                        sample_stats[fn] = {
+                            "min": float(col.quantile(0.01)),
+                            "max": float(col.quantile(0.99)),
+                            "mean": float(col.mean())
+                        }
+        except Exception:
+            sample_stats = {}
+
+    if "sim_values" not in st.session_state:
+        st.session_state.sim_values = {
+            fn: sample_stats.get(fn, {"mean": 0.0})["mean"] for fn in feature_names
+        }
+
+    for fn in constant_features:
+        if fn not in st.session_state.sim_values:
+            st.session_state.sim_values[fn] = 0.0
+
+    # --- Engine sync checkbox ---
+    st.markdown("### ⚙️ Engine Pairing Options")
+    keep_constant = st.checkbox("Keep 2nd engine values constant (mirror engine 1)?", value=True)
+
+    # --- Editable parameters ---
+    st.markdown("### ✈️ Adjustable Parameters")
+    sim_cols = st.columns(2)
+    idx = 0
+    for fn in feature_names:
+        # Skip 2nd engine values if syncing is on
+        if keep_constant and any(fn.endswith(suffix) for suffix in ["_2hp", "_2lb", "2engin", "__2_pcnt", "_2__deg", "2__psi"]):
+            continue
+
+        stats = sample_stats.get(fn, {"mean": 0.0})
+        default = st.session_state.sim_values.get(fn, stats["mean"])
+        step = 0.01
+
+        with sim_cols[idx % 2]:
+            val = st.number_input(fn, value=float(default), step=step, key=f"sim_{fn}")
+            st.session_state.sim_values[fn] = val
+        idx += 1
+
+    # --- Mirror values automatically if checkbox enabled ---
+    if keep_constant:
+        mirror_pairs = [
+            ("power_1hp", "power_2hp"),
+            ("thrst_1lb", "thrst_2lb"),
+            ("rpm_1engin", "rpm_2engin"),
+            ("N1__1_pcnt", "N1__2_pcnt"),
+            ("N2__1_pcnt", "N2__2_pcnt"),
+            ("EGT_1__deg", "EGT_2__deg"),
+            ("OILT1__deg", "OILT2__deg"),
+            ("FUEP1__psi", "FUEP2__psi"),
+        ]
+        for a, b in mirror_pairs:
+            if a in st.session_state.sim_values:
+                st.session_state.sim_values[b] = st.session_state.sim_values[a]
+
+    # --- Randomize / Reset ---
+    if sim_randomize:
+        for fn in feature_names:
+            if fn in constant_features:
+                continue
+            stats = sample_stats.get(fn, {"min": 0.0, "max": 1.0})
+            st.session_state.sim_values[fn] = float(np.random.uniform(stats["min"], stats["max"]))
+        st.rerun()
+
+    if sim_reset:
+        for fn in feature_names:
+            stats = sample_stats.get(fn, {"mean": 0.0})
+            st.session_state.sim_values[fn] = stats.get("mean", 0.0)
+        st.rerun()
+
+    # --- Noise effect (optional) ---
+    if sim_apply_noise:
+        for fn in feature_names:
+            base = st.session_state.sim_values[fn]
+            noise = sim_noise_amp * np.sin(time.time() * (0.5 + (hash(fn) % 7)))
+            st.session_state.sim_values[fn] = float(base + noise)
+
+    # --- Combine all values into DataFrame ---
+    all_features = feature_names + constant_features
+    sim_df = pd.DataFrame([{k: st.session_state.sim_values.get(k, 0.0) for k in all_features}])
+
+    with st.expander("🔎 Current Simulation Input"):
+        st.table(sim_df.T.rename(columns={0: "value"}))
+
+    # --- Model Predictions ---
+    try:
+        X_for_xgb = clean_features_for_model(sim_df)
+        xgb_prob = float(xgb_model.predict_proba(X_for_xgb)[0][1]) if xgb_model else 0.0
+    except Exception:
+        xgb_prob = 0.0
+
+    try:
+        X_num = sim_df.select_dtypes(include=[np.number])
+        if scaler is not None:
+            expected = getattr(scaler, "feature_names_in_", None)
+            if expected is not None:
+                for col in expected:
+                    if col not in X_num.columns:
+                        X_num[col] = 0.0
+                X_num = X_num[expected]
+        scaled_row = scaler.transform(X_num) if scaler else X_num.values
+        if "sim_seq_buf" not in st.session_state:
+            st.session_state.sim_seq_buf = []
+        st.session_state.sim_seq_buf.append(scaled_row.flatten())
+        st.session_state.sim_seq_buf = st.session_state.sim_seq_buf[-DEFAULT_LSTM_TIMESTEPS:]
+        lstm_prob = float(lstm_model.predict(
+            np.array(st.session_state.sim_seq_buf[-DEFAULT_LSTM_TIMESTEPS:])
+            .reshape(1, DEFAULT_LSTM_TIMESTEPS, -1), verbose=0)[0][0]
+        ) if (len(st.session_state.sim_seq_buf) >= DEFAULT_LSTM_TIMESTEPS and lstm_model) else 0.0
+    except Exception:
+        lstm_prob = 0.0
+
+    combined_sim = (xgb_prob + lstm_prob)
+
+    # --- Sidebar gauge ---
+    with st.sidebar:
+        st.title("🎯 Failure Probability")
+        render_gauge(combined_sim, sim_g_threshold, sim_y_threshold)
+
+    # --- Metrics ---
+    st.metric("XGBoost Prob", f"{xgb_prob:.3f}")
+    st.metric("LSTM Prob", f"{lstm_prob:.3f}")
+    st.metric("Combined", f"{combined_sim:.3f}")
 
 # ---------- FOOTER ----------
 st.markdown("---")
