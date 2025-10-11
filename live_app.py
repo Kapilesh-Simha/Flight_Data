@@ -149,6 +149,7 @@ def identify_top_contributors(xgb_model, scaler, features_df_or_dict, top_k=3):
     return [{"feature": feat_names[i], "value": row_vals[i], "score": scores[i]} for i in top_idx]
 
 # ---------- UI ----------
+st.title("✈️ X-Plane Predictive Maintenance Dashboard")
 with st.sidebar.expander("📘 About This Dashboard"):
     st.markdown("""
     ### ✈️ X-Plane Predictive Maintenance Dashboard
@@ -190,25 +191,47 @@ scaler = load_scaler()
 gauge_ph = st.empty()
 
 def render_gauge(prob, g_thresh, y_thresh):
-    """Animated cinematic gauge with glowing background that reacts to failure probability."""
+    """Animated cinematic gauge with glowing background + 3s red-zone alarm."""
     prob = float(np.clip(prob, 0.0, 1.0))
+
+    # Initialize alarm state if not exists
+    if "alarm_triggered" not in st.session_state:
+        st.session_state.alarm_triggered = False
 
     # Determine zone colors + glow intensity
     if prob <= g_thresh:
         bar_color = "#15FF00"       # bright green
-        bg_color = "rgba(0, 200, 0, 0.5)"  # subtle green
+        bg_color = "rgba(0, 200, 0, 0.5)"
         pulse_strength = 0.1
+        st.session_state.alarm_triggered = False  # Reset alarm
     elif prob <= y_thresh:
         bar_color = "#FFD700"       # amber
         bg_color = "rgba(255, 215, 0, 0.25)"
         pulse_strength = 0.3
+        st.session_state.alarm_triggered = False  # Reset alarm
     else:
-        bar_color = "#FF4C4C"       # bright red
+        bar_color = "#FF4C4C"       # red
         bg_color = "rgba(255, 0, 0, 0.3)"
         pulse_strength = 0.6
 
-    pulse_phase = (time.time() * 2.5) % (2 * np.pi) 
-    pulse_alpha = 0.25 + pulse_strength * (0.5 + 0.5 * np.sin(pulse_phase)) 
+        # 🚨 Trigger alarm only once per red-zone entry
+        if not st.session_state.alarm_triggered:
+            st.session_state.alarm_triggered = True
+            st.markdown(
+                """
+                <script>
+                setTimeout(() => {
+                    const a = document.getElementById('alert-sound');
+                    if (a) { a.pause(); a.currentTime = 0; a.remove(); }
+                }, 3000);
+                </script>
+                """,
+                unsafe_allow_html=True
+            )
+
+    # Background pulse animation
+    pulse_phase = (time.time() * 2.5) % (2 * np.pi)
+    pulse_alpha = 0.25 + pulse_strength * (0.5 + 0.5 * np.sin(pulse_phase))
     glow_rgba = f"rgba(255, 0, 0, {pulse_alpha:.2f})" if prob > y_thresh else bg_color
 
     # Build the gauge
@@ -248,17 +271,23 @@ def render_gauge(prob, g_thresh, y_thresh):
 
     gauge_ph.plotly_chart(fig, use_container_width=True, key=f"gauge_{time.time_ns()}")
 
+
 def zone_label(prob, g_thresh, y_thresh):
     if prob <= g_thresh:
         return "🟢 STABLE","green","Engine is operating normally! 😊"
     elif prob <= y_thresh:
         return "🟡 LOW RISK","gold","Model has detected minor anomalies!"
     else:
+        st.markdown("""
+        <audio autoplay>
+            <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+        </audio>
+    """, unsafe_allow_html=True)
         return "🔴 HIGH RISK","red","Potential failure detected! Consider replacing the part before failure!"
 
 # ---------- REAL-TIME STREAMING ----------
 if mode == "📡 Real-Time Streaming":
-    st.title("📡 Real-Time Predictive Maintenance Dashboard")
+    st.subheader("📡 Real-Time Predictive Maintenance Dashboard")
 
     st.sidebar.subheader("🔧 Stream Controls")
     refresh_rate = st.sidebar.slider("Refresh Interval (seconds)", 0.5, 10.0, 1.0, 0.5)
@@ -608,3 +637,4 @@ if "live_log_df" in st.session_state and not st.session_state.live_log_df.empty:
     csv_bytes = st.session_state.live_log_df.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Download Log (CSV)", csv_bytes, "live_log.csv", "text/csv")
 st.caption("🛫 Unified Predictive Maintenance Dashboard | XGBoost + LSTM | Real-time + Batch Analysis + Logging + Fault Insights")
+st.sidebar.caption("Made by Kapilesh Simha with ❤️ | 2025")
